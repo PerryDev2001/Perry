@@ -9,7 +9,7 @@
 
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..800&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..800&family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -88,10 +88,26 @@
       <p class="chat-status" id="chatStatus" role="status" hidden></p>
 
       <form class="chat-form" id="chatForm" autocomplete="off">
-        <input class="chat-name" id="chatName" type="text" maxlength="24" placeholder="Your name (optional)" aria-label="Your name (optional)" autocomplete="nickname" />
+        <label class="chat-name-row">
+          <span class="chat-name-label">Name</span>
+          <input class="chat-name" id="chatName" type="text" maxlength="24" placeholder="Anonymous" autocomplete="nickname" />
+        </label>
+
+        <div class="emoji-picker" id="emojiPicker" role="dialog" aria-label="Choose an emoji" hidden>
+          <div class="emoji-tabs" id="emojiTabs" role="tablist"></div>
+          <div class="emoji-grid" id="emojiGrid"></div>
+        </div>
+
         <div class="chat-compose">
+          <button class="chat-emoji-btn" id="emojiToggle" type="button" aria-label="Add emoji" aria-expanded="false" aria-controls="emojiPicker">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="9" />
+              <path d="M8.5 14.5a4.5 4.5 0 0 0 7 0M9 9.5h.01M15 9.5h.01" />
+            </svg>
+          </button>
           <textarea class="chat-text" id="chatText" rows="1" maxlength="500" placeholder="Write a message…" aria-label="Message" required></textarea>
-          <button class="chat-send" id="chatSend" type="submit" aria-label="Send message">
+          <span class="chat-count" id="chatCount" aria-live="polite" hidden></span>
+          <button class="chat-send" id="chatSend" type="submit" aria-label="Send message" disabled>
             <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6" /></svg>
           </button>
         </div>
