@@ -6,11 +6,11 @@ const SDK = "https://www.gstatic.com/firebasejs/10.12.2";
 const statusBox = document.getElementById("chatStatus");
 
 let initializeApp, getAnalytics, isSupported;
-let getFirestore, collection, addDoc, query, orderBy, limit, onSnapshot, serverTimestamp;
+let getFirestore, collection, addDoc, query, orderBy, limit, onSnapshot, serverTimestamp, getCountFromServer;
 try {
   ({ initializeApp } = await import(`${SDK}/firebase-app.js`));
   ({ getAnalytics, isSupported } = await import(`${SDK}/firebase-analytics.js`));
-  ({ getFirestore, collection, addDoc, query, orderBy, limit, onSnapshot, serverTimestamp } =
+  ({ getFirestore, collection, addDoc, query, orderBy, limit, onSnapshot, serverTimestamp, getCountFromServer } =
     await import(`${SDK}/firebase-firestore.js`));
 } catch (err) {
   console.error(err);
@@ -520,4 +520,179 @@ document.addEventListener("keydown", (e) => {
   if (pickerOpen()) closePicker();
   else if (isOpen()) close();
 });
+/* ---------- Visitors (who viewed the page) ---------- */
+const visitsRef = collection(db, "visits");
+const VISITS_SHOWN = 50;
+
+const vBtn = document.getElementById("viewersToggle");
+const vPanel = document.getElementById("viewersPanel");
+const vList = document.getElementById("viewersList");
+const vTotal = document.getElementById("viewersTotal");
+const vCount = document.getElementById("viewersCount");
+const vLabel = document.getElementById("viewersLabel");
+
+const myVisits = new Set(store.get("visit-mine", []));
+let totalViews = null;
+
+const compact = (n) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k` : String(n));
+
+let shownViews = 0;
+let countAnim = 0;
+
+// The number counts up to the new total
+const showTotal = () => {
+  if (totalViews === null) return;
+  vCount.classList.remove("is-loading");
+  vLabel.textContent = totalViews === 1 ? "visitor" : "visitors";
+  vTotal.textContent = `${totalViews.toLocaleString()} ${totalViews === 1 ? "visit" : "visits"} · one per visitor per day`;
+  vBtn.setAttribute("aria-label", `${totalViews.toLocaleString()} visitors. See who viewed this page`);
+
+  cancelAnimationFrame(countAnim);
+  const from = shownViews;
+  const to = totalViews;
+  const start = performance.now();
+  const dur = from === 0 ? 1100 : 500;
+  const step = (now) => {
+    const p = Math.min((now - start) / dur, 1);
+    const eased = 1 - Math.pow(1 - p, 3);
+    shownViews = Math.round(from + (to - from) * eased);
+    vCount.textContent = compact(shownViews);
+    if (p < 1) countAnim = requestAnimationFrame(step);
+  };
+  countAnim = requestAnimationFrame(step);
+};
+
+const ago = (date) => {
+  if (!date) return "just now";
+  const s = Math.max(0, (Date.now() - date.getTime()) / 1000);
+  if (s < 45) return "just now";
+  if (s < 3600) return `${Math.round(s / 60)}m ago`;
+  if (s < 86400) return `${Math.round(s / 3600)}h ago`;
+  if (s < 604800) return `${Math.round(s / 86400)}d ago`;
+  return date.toLocaleDateString([], { month: "short", day: "numeric" });
+};
+
+const DEVICE_ICONS = {
+  phone: '<rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M11 18.5h2"/>',
+  tablet: '<rect x="4.5" y="2.5" width="15" height="19" rx="2.5"/><path d="M11 18.5h2"/>',
+  computer: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>',
+};
+
+const deviceKind = (device = "") => {
+  if (/iPad|tablet/i.test(device)) return "tablet";
+  if (/PC|Mac|Chromebook|Linux|Unknown/i.test(device)) return "computer";
+  return "phone";
+};
+
+let lastVisitDocs = [];
+
+const renderVisits = () => {
+  if (!lastVisitDocs.length) {
+    vList.replaceChildren(el("li", "viewers-empty", "No visitors recorded yet."));
+    return;
+  }
+  vList.replaceChildren(...lastVisitDocs.map((d) => {
+    const v = d.data({ serverTimestamps: "estimate" });
+    const date = v.createdAt?.toDate?.();
+    const item = el("li", "viewer");
+
+    const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    icon.setAttribute("viewBox", "0 0 24 24");
+    icon.setAttribute("class", "viewer-icon");
+    icon.setAttribute("aria-hidden", "true");
+    icon.innerHTML = DEVICE_ICONS[deviceKind(v.device)];   // fixed markup, never user text
+
+    const info = el("div", "viewer-info");
+    const name = el("span", "viewer-device", v.device || "Unknown device");
+    if (myVisits.has(d.id)) name.append(el("span", "viewer-you", "You"));
+    info.append(name);
+    if (v.country) {
+      const where = el("span", "viewer-where",
+        NO_FLAGS ? `${v.country}${v.countryName ? ` · ${v.countryName}` : ""}` : `${flag(v.country)} ${v.countryName || v.country}`);
+      info.append(where);
+    }
+
+    const when = el("time", "viewer-time", ago(date));
+    if (date) { when.dateTime = date.toISOString(); when.title = date.toLocaleString(); }
+
+    item.append(icon, info, when);
+    return item;
+  }));
+};
+
+// Record this visit once per browser per day
+const recordVisit = async () => {
+  const today = new Date().toDateString();
+  if (store.get("visit-day", "") === today) return;
+  try {
+    const [device, country] = await Promise.all([detectDevice(), detectCountry()]);
+    const ref = await addDoc(visitsRef, {
+      device: device.slice(0, 40),
+      country: country.code,
+      countryName: country.name,
+      createdAt: serverTimestamp(),
+    });
+    store.set("visit-day", today);
+    myVisits.add(ref.id);
+    store.set("visit-mine", [...myVisits].slice(-30));
+  } catch (err) {
+    console.warn("Visit not recorded:", err.code || err);
+  }
+};
+
+// Total number of views (counted on the server), then kept up to date live
+getCountFromServer(visitsRef)
+  .then((snap) => { totalViews = snap.data().count; showTotal(); })
+  .catch(() => {
+    vTotal.textContent = "Recent visitors";
+    vCount.classList.remove("is-loading");
+    vCount.textContent = "";
+    vLabel.textContent = "visitors";
+  });
+
+let visitsLoaded = false;
+onSnapshot(
+  query(visitsRef, orderBy("createdAt", "desc"), limit(VISITS_SHOWN)),
+  (snap) => {
+    if (visitsLoaded && totalViews !== null) {
+      totalViews += snap.docChanges().filter((c) => c.type === "added").length;
+      showTotal();
+    }
+    visitsLoaded = true;
+    lastVisitDocs = snap.docs;
+    renderVisits();
+  },
+  (err) => {
+    console.error(err);
+    vList.replaceChildren(el("li", "viewers-empty",
+      err.code === "permission-denied" ? "Visitors aren't set up yet (Firestore rules)." : "Couldn't load visitors."));
+  }
+);
+
+recordVisit();
+
+// Keep the "5m ago" labels fresh while the list is open
+setInterval(() => { if (!vPanel.hidden) renderVisits(); }, 60 * 1000);
+
+const vOpen = () => !vPanel.hidden;
+const openViewers = () => {
+  vPanel.hidden = false;
+  requestAnimationFrame(() => vPanel.classList.add("is-open"));
+  vBtn.setAttribute("aria-expanded", "true");
+  renderVisits();
+};
+const closeViewers = () => {
+  vPanel.classList.remove("is-open");
+  vBtn.setAttribute("aria-expanded", "false");
+  setTimeout(() => { if (!vPanel.classList.contains("is-open")) vPanel.hidden = true; }, 200);
+};
+
+vBtn.addEventListener("click", () => (vOpen() ? closeViewers() : openViewers()));
+document.addEventListener("pointerdown", (e) => {
+  if (vOpen() && !vPanel.contains(e.target) && !vBtn.contains(e.target)) closeViewers();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && vOpen()) closeViewers();
+});
+
 })();

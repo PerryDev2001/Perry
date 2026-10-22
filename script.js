@@ -631,7 +631,7 @@ const ThemeReveal = {
     dot.classList.toggle("is-active", state.overInteractive);
   };
 
-  const inChat = (e) => !!(e.target && e.target.closest && e.target.closest(".chat"));
+  const inChat = (e) => !!(e.target && e.target.closest && e.target.closest(".chat, .viewers"));
 
   const onDown = (e) => {
     // Touches in the chat are for scrolling and typing, not for the hearts

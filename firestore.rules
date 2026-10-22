@@ -26,6 +26,24 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // Visitors: anyone can read the list and record a visit; nobody can edit or delete.
+    match /visits/{visitId} {
+      allow read: if true;
+
+      allow create: if
+        request.resource.data.keys().hasOnly(['device', 'country', 'countryName', 'createdAt']) &&
+        request.resource.data.keys().hasAll(['device', 'country', 'countryName', 'createdAt']) &&
+        request.resource.data.device is string &&
+        request.resource.data.device.size() <= 40 &&
+        request.resource.data.country is string &&
+        request.resource.data.country.size() <= 2 &&
+        request.resource.data.countryName is string &&
+        request.resource.data.countryName.size() <= 56 &&
+        request.resource.data.createdAt == request.time;
+
+      allow update, delete: if false;
+    }
+
     // Everything else is closed.
     match /{document=**} {
       allow read, write: if false;
