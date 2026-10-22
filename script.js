@@ -45,6 +45,9 @@
   const DOT_SIZE = 10;
   const BURST_COUNT = 8;
   const MAX_SPEED = 5;
+  const JOIN_AT = 0.3;                           // pull strength at which a heart joins for good
+  const MAX_JOINED = 40;                         // hearts in a complete cursor heart
+  const SPAWN_EVERY = 0.05;                      // s between hearts added to fill gaps
   const HEART_SCALE = 4.6;                       // cursor heart size (~150px wide)
 
   const clamp = (v, min, max) => Math.min(Math.max(v, min), max);
@@ -84,14 +87,12 @@
   readTone();
   new MutationObserver(readTone).observe(root, { attributes: true, attributeFilter: ["data-theme"] });
 
-  const ambient = Array.from({ length: AMBIENT_COUNT }, () => {
+  const makeParticle = (x = Math.random() * W, y = Math.random() * H, extra = false) => {
     // Mostly small dots, a few larger ones
     const size = 3 + Math.pow(Math.random(), 2.2) * 8;
 
     const heading = Math.random() * Math.PI * 2;
     const speed = (0.3 + Math.random() * 0.6) * (1 - size / 22);
-    const x = Math.random() * W;
-    const y = Math.random() * H;
 
     return {
       size,
@@ -103,8 +104,13 @@
       phase: Math.random() * Math.PI * 2,
       wander: 0.15 + Math.random() * 0.2,        // how fast the heading meanders
       influence: 0, order: 0, tx: 0, ty: 0,      // heart-formation state
+      joined: false, lockMix: 0,
+      extra,                                     // added to fill the cursor heart
+      fade: extra ? 0 : 1,                       // extras fade in / out
     };
-  });
+  };
+
+  const ambient = Array.from({ length: AMBIENT_COUNT }, () => makeParticle());
 
   const snap = () => {
     state.dx = state.mx;
@@ -170,40 +176,105 @@
     };
   };
   const TAU = Math.PI * 2;
-  const captured = [];
 
   const updateAmbient = (f, t, lerp) => {
     const hasTarget = state.visible;
-    const R = state.overInteractive ? 340 : state.overCard ? 300 : 260;   // magnet reach
+    const R = state.overInteractive ? 190 : state.overCard ? 170 : 150;   // magnet reach
 
     // Heart size, with a gentle heartbeat
     const beat = 1 + 0.05 * Math.pow(Math.max(Math.sin(t * 2.6), 0), 6);
     const scale = HEART_SCALE * beat * (state.pressed ? 0.85 : 1);
 
     // Magnet influence (0 = free, 1 = fully attracted)
-    captured.length = 0;
+    const members = [];
+    let joined = 0;
+    for (const p of ambient) if (p.joined) joined++;
+
     for (const p of ambient) {
       p.influence = 0;
-      if (!hasTarget) continue;
+      if (!hasTarget) {
+        // Cursor gone / finger lifted: everyone is released
+        p.joined = false;
+        p.lockMix = 0;
+        continue;
+      }
+
       const d = Math.hypot(state.dx - p.x, state.dy - p.y);
+      let influence = 0;
       if (d < R) {
         const u = 1 - d / R;
-        p.influence = u * u * (3 - 2 * u);   // smoothstep
-        if (p.influence > 0.02) {
-          // Order around the cursor, starting from the top (the heart's dip)
-          p.order = (Math.atan2(p.y - state.dy, p.x - state.dx) + Math.PI / 2 + TAU) % TAU;
-          captured.push(p);
+        influence = u * u * (3 - 2 * u);   // smoothstep
+      }
+
+      // Pulled in close enough: join the heart and stay
+      if (!p.joined && influence > JOIN_AT && joined < MAX_JOINED) {
+        p.joined = true;
+        joined++;
+      }
+      if (p.joined) {
+        p.lockMix += (1 - p.lockMix) * lerp(0.04);
+        influence = Math.max(influence, p.lockMix);
+      }
+
+      p.influence = influence;
+      if (influence > 0.02) {
+        // Position around the cursor, starting from the top (the heart's dip)
+        p.order = (Math.atan2(p.y - state.dy, p.x - state.dx) + Math.PI / 2 + TAU) % TAU;
+        if (p.joined) {
+          members.push(p);
+        } else {
+          // Not a member yet: drawn toward the nearest part of the outline
+          const pt = heartPoint(p.order, scale);
+          p.tx = state.dx + pt.x;
+          p.ty = state.dy + pt.y;
         }
       }
     }
 
-    // Spread captured particles evenly along the heart outline, keeping their order
-    captured.sort((a, b) => a.order - b.order);
-    const n = captured.length;
+    // Add new hearts into the biggest empty gap until the outline is complete
+    state.spawnClock = hasTarget ? (state.spawnClock || 0) + f / 60 : 0;
+    while (hasTarget && joined < MAX_JOINED && state.spawnClock >= SPAWN_EVERY) {
+      state.spawnClock -= SPAWN_EVERY;
+
+      let gapAt = Math.random() * TAU;
+      if (members.length) {
+        members.sort((a, b) => a.order - b.order);
+        let best = -1;
+        for (let i = 0; i < members.length; i++) {
+          const from = members[i].order;
+          const to = i + 1 < members.length ? members[i + 1].order : members[0].order + TAU;
+          if (to - from > best) { best = to - from; gapAt = (from + best / 2) % TAU; }
+        }
+      }
+
+      // Appear just outside the gap and glide in
+      const pt = heartPoint(gapAt, scale * 1.2);
+      const p = makeParticle(state.dx + pt.x, state.dy + pt.y, true);
+      p.vx = p.vy = 0;
+      p.joined = true;
+      p.lockMix = 0.5;
+      p.influence = 1;
+      p.order = gapAt;
+      ambient.push(p);
+      members.push(p);
+      joined++;
+    }
+
+    // Spread members evenly along the heart outline, keeping their order
+    members.sort((a, b) => a.order - b.order);
+    const n = members.length;
     for (let i = 0; i < n; i++) {
       const pt = heartPoint(((i + 0.5) / n) * TAU, scale);
-      captured[i].tx = state.dx + pt.x;
-      captured[i].ty = state.dy + pt.y;
+      members[i].tx = state.dx + pt.x;
+      members[i].ty = state.dy + pt.y;
+    }
+
+    // Extras fade in while in the heart and fade out (then go) once released
+    for (let i = ambient.length - 1; i >= 0; i--) {
+      const p = ambient[i];
+      if (!p.extra) continue;
+      p.fade += ((p.joined ? 1 : 0) - p.fade) * lerp(p.joined ? 0.12 : 0.03);
+      if (!p.joined && p.fade < 0.01) ambient.splice(i, 1);
     }
 
     for (const p of ambient) {
@@ -221,11 +292,11 @@
 
       // Spring toward its slot on the heart outline
       if (influence > 0.02) {
-        const k = 0.012 * influence * state.kScale;
+        const k = 0.006 * influence * state.kScale;
         p.vx += (p.tx - p.x) * k * f;
         p.vy += (p.ty - p.y) * k * f;
 
-        const damp = Math.pow(1 - 0.14 * influence, f);
+        const damp = Math.pow(1 - 0.1 * influence, f);
         p.vx *= damp;
         p.vy *= damp;
       }
@@ -270,7 +341,7 @@
     ctx.fillStyle = tone;
 
     for (const p of ambient) {
-      ctx.globalAlpha = p.alpha;
+      ctx.globalAlpha = p.alpha * p.fade;
       drawHeart(p.x, p.y, Math.max(p.size * 1.6, 7));
     }
     ctx.globalAlpha = 1;
@@ -287,7 +358,7 @@
     const lerp = (rate) => 1 - Math.pow(1 - rate, f);
 
     // Hover-based magnetism strength
-    const kTarget = state.overInteractive ? 1.6 : state.overCard ? 1.25 : 1;
+    const kTarget = state.overInteractive ? 1.3 : state.overCard ? 1.1 : 1;
     state.kScale += (kTarget - state.kScale) * lerp(0.06);
 
     if (state.visible) {
