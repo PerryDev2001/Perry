@@ -60,6 +60,45 @@
     <span>© 2026 Perry Philip Lozano</span>
   </footer>
 
+  <!-- Public chat -->
+  <div class="chat">
+    <button class="chat-fab reveal" style="--i: 5" type="button" id="chatToggle" aria-label="Open chat" aria-expanded="false" aria-controls="chatPanel">
+      <svg class="chat-fab-icon" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 9.3 9.3 0 0 1-3.6-.7L3 21l1.6-4.6A8 8 0 0 1 3 11.5 8.6 8.6 0 0 1 12 3a8.6 8.6 0 0 1 9 8.5Z" />
+        <path class="chat-fab-heart" d="M12 15.2s-3.2-1.9-3.2-4a1.7 1.7 0 0 1 3.2-.8 1.7 1.7 0 0 1 3.2.8c0 2.1-3.2 4-3.2 4Z" />
+      </svg>
+      <span class="chat-badge" id="chatBadge" hidden>0</span>
+    </button>
+
+    <section class="chat-panel" id="chatPanel" role="dialog" aria-labelledby="chatTitle" hidden>
+      <header class="chat-head">
+        <div>
+          <h2 class="chat-title" id="chatTitle"><span class="chat-live" aria-hidden="true"></span>Chat</h2>
+          <p class="chat-sub">Say hi. Everyone can see messages here.</p>
+        </div>
+        <button class="icon-btn chat-close" type="button" id="chatClose" aria-label="Close chat">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
+        </button>
+      </header>
+
+      <ol class="chat-list" id="chatList" aria-live="polite">
+        <li class="chat-empty">Loading messages…</li>
+      </ol>
+
+      <p class="chat-status" id="chatStatus" role="status" hidden></p>
+
+      <form class="chat-form" id="chatForm" autocomplete="off">
+        <input class="chat-name" id="chatName" type="text" maxlength="24" placeholder="Your name (optional)" aria-label="Your name (optional)" autocomplete="nickname" />
+        <div class="chat-compose">
+          <textarea class="chat-text" id="chatText" rows="1" maxlength="500" placeholder="Write a message…" aria-label="Message" required></textarea>
+          <button class="chat-send" id="chatSend" type="submit" aria-label="Send message">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6" /></svg>
+          </button>
+        </div>
+      </form>
+    </section>
+  </div>
+
   <div class="ambient-layer" id="ambientLayer" aria-hidden="true"></div>
 
   <div class="cursor-layer" id="cursorLayer" aria-hidden="true">
@@ -67,5 +106,6 @@
   </div>
 
   <script src="script.js"></script>
+  <script src="chat.js" defer></script>
 </body>
 </html>

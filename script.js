@@ -1,3 +1,27 @@
+/* ---------- Theme reveal (shared by the clip-path and the hearts) ---------- */
+// The new theme grows as a circle out of the theme button until it reaches the
+// farthest corner (lower-left). The clip-path and the hearts riding its edge use
+// the same timing curve, so they stay in step.
+const ThemeReveal = {
+  duration: 1300,
+  easing: "cubic-bezier(0.65, 0, 0.35, 1)",                                     // easeInOutCubic in CSS
+  ease: (x) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2),   // ...and in JS
+
+  // Circle centre and the radius needed to cover the whole screen from there
+  geometry(button) {
+    const r = button.getBoundingClientRect();
+    const cx = r.left + r.width / 2;
+    const cy = r.top + r.height / 2;
+    const W = window.innerWidth;
+    const H = window.innerHeight;
+    return { cx, cy, maxR: Math.hypot(Math.max(cx, W - cx), Math.max(cy, H - cy)) };
+  },
+
+  radius(progress, maxR) {
+    return this.ease(progress) * maxR;
+  },
+};
+
 /* ---------- Theme ---------- */
 (() => {
   const root = document.documentElement;
@@ -20,10 +44,49 @@
 
   applyTheme(getStored() || (systemPrefersDark.matches ? "dark" : "light"));
 
+  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+
+  // Ask the heart particles (set up below) to do things
+  const hearts = (type, detail) => window.dispatchEvent(new CustomEvent(`hearts:${type}`, { detail }));
+
   toggle.addEventListener("click", () => {
     const next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
-    applyTheme(next);
     setStored(next);
+
+    if (reduceMotion.matches) {
+      applyTheme(next);
+      return;
+    }
+
+    const { cx, cy, maxR } = ThemeReveal.geometry(toggle);
+    hearts("burst", { x: cx, y: cy, count: 14, speed: 3.5 });
+
+    if (!document.startViewTransition) {
+      applyTheme(next);     // falls back to the CSS colour fade
+      hearts("sweep", { cx, cy, maxR });
+      return;
+    }
+
+    // The new theme grows as a circle from the button to the lower-left corner;
+    // a ring of hearts rides its edge the whole way
+    root.classList.add("theme-switching");
+    const vt = document.startViewTransition(() => applyTheme(next));
+    vt.ready.then(() => {
+      root.animate(
+        { clipPath: [`circle(0px at ${cx}px ${cy}px)`, `circle(${maxR}px at ${cx}px ${cy}px)`] },
+        { duration: ThemeReveal.duration, easing: ThemeReveal.easing, pseudoElement: "::view-transition-new(root)" }
+      );
+      // The old page dims and eases back slightly as it's covered
+      root.animate(
+        [
+          { filter: "brightness(1)", transform: "scale(1)", transformOrigin: `${cx}px ${cy}px` },
+          { filter: "brightness(0.85)", transform: "scale(0.985)", transformOrigin: `${cx}px ${cy}px` },
+        ],
+        { duration: ThemeReveal.duration, easing: "ease-in", pseudoElement: "::view-transition-old(root)" }
+      );
+      hearts("sweep", { cx, cy, maxR });
+    }).catch(() => {});
+    vt.finished.finally(() => root.classList.remove("theme-switching"));
   });
 
   systemPrefersDark.addEventListener("change", (e) => {
@@ -48,6 +111,10 @@
   const JOIN_AT = 0.3;                           // pull strength at which a heart joins for good
   const MAX_JOINED = 40;                         // hearts in a complete cursor heart
   const SPAWN_EVERY = 0.05;                      // s between hearts added to fill gaps
+  const LIFE_MIN = 6, LIFE_MAX = 14;             // s each floating heart lives before being reborn
+  const FADE_IN = 1.2, FADE_OUT = 1.5;           // s
+  const RELEASE_AT = 220;                        // px: hearts left this far behind let go
+  const SPAWN_MAX_SPEED = 3;                     // px/frame: only fill the heart when the cursor is nearly still
   const HEART_SCALE = 4.6;                       // cursor heart size (~150px wide)
 
   const clamp = (v, min, max) => Math.min(Math.max(v, min), max);
@@ -106,11 +173,117 @@
       influence: 0, order: 0, tx: 0, ty: 0,      // heart-formation state
       joined: false, lockMix: 0,
       extra,                                     // added to fill the cursor heart
-      fade: extra ? 0 : 1,                       // extras fade in / out
+      fade: 0,                                   // fades in when born, out when it ends
+      life: LIFE_MIN + Math.random() * (LIFE_MAX - LIFE_MIN),   // s
+      age: 0,
     };
   };
 
-  const ambient = Array.from({ length: AMBIENT_COUNT }, () => makeParticle());
+  // Short-lived hearts that pop out and fade (theme switch)
+  const makeBurst = (x, y, speed) => {
+    const p = makeParticle(x, y);
+    const a = Math.random() * TAU;
+    const v = speed * (0.4 + Math.random() * 0.8);
+    p.burst = true;
+    p.vx = Math.cos(a) * v;
+    p.vy = Math.sin(a) * v;
+    p.life = 1.1 + Math.random() * 1.1;
+    return p;
+  };
+
+  window.addEventListener("hearts:burst", (e) => {
+    if (!state.active) return;
+    const { x, y, count = 1, speed = 2 } = e.detail || {};
+    for (let i = 0; i < count && ambient.length < AMBIENT_COUNT + 260; i++) {
+      ambient.push(makeBurst(x, y, speed));
+    }
+  });
+
+  // Theme sweep: a ring of hearts rides the edge of the growing circle
+  const sweep = { active: false, start: 0, progress: 0, radius: 0, cx: 0, cy: 0, maxR: 0, riders: [] };
+
+  window.addEventListener("hearts:sweep", (e) => {
+    if (!state.active) return;
+    // A sweep already running: let its riders go first
+    for (const p of sweep.riders) releaseRider(p);
+
+    const d = (e && e.detail) || {};
+    sweep.cx = d.cx ?? W;
+    sweep.cy = d.cy ?? 0;
+    sweep.maxR = d.maxR ?? Math.hypot(W, H);
+    sweep.active = true;
+    sweep.start = performance.now();
+    sweep.progress = 0;
+    sweep.radius = 0;
+
+    const n = 64;
+    sweep.riders = Array.from({ length: n }, (_, i) => {
+      const p = makeParticle(sweep.cx, sweep.cy);
+      p.rider = true;
+      p.fade = 0;
+      p.angle = (i / n) * TAU + (Math.random() - 0.5) * 0.08;
+      p.spin = (Math.random() < 0.5 ? -1 : 1) * (0.05 + Math.random() * 0.08);   // slow drift along the ring
+      p.bob = 2 + Math.random() * 5;            // px it bobs around the edge
+      ambient.push(p);
+      return p;
+    });
+  });
+
+  // Rider leaves the edge: spills outward softly and fades
+  function releaseRider(p) {
+    p.rider = false;
+    p.burst = true;
+    p.age = 0.12;                                // already faded in
+    p.life = 0.9 + Math.random() * 0.8;
+    const a = p.angle ?? Math.PI * 0.75;
+    const v = 0.6 + Math.random() * 1.4;
+    p.vx = Math.cos(a) * v;
+    p.vy = Math.sin(a) * v;
+  }
+
+  const onScreen = (x, y) => x > -30 && x < W + 30 && y > -30 && y < H + 30;
+
+  const updateSweep = (now, t, lerp) => {
+    if (!sweep.active) return;
+    const progress = Math.min((now - sweep.start) / ThemeReveal.duration, 1);
+    const radius = ThemeReveal.radius(progress, sweep.maxR);
+    sweep.progress = progress;
+    sweep.radius = radius;
+
+    for (const p of sweep.riders) {
+      p.angle += p.spin * (1 / 60);
+      const r = radius + Math.sin(t * 5 + p.phase) * p.bob;
+      p.x = sweep.cx + Math.cos(p.angle) * r;
+      p.y = sweep.cy + Math.sin(p.angle) * r;
+      p.fade += (1 - p.fade) * lerp(0.25);
+    }
+
+    // Sparkle trail just inside the edge (only where it's on screen)
+    if (progress < 1) {
+      for (let i = 0, made = 0; i < 12 && made < 3; i++) {
+        const a = Math.random() * TAU;
+        const r = Math.max(radius - Math.random() * 18, 0);
+        const x = sweep.cx + Math.cos(a) * r;
+        const y = sweep.cy + Math.sin(a) * r;
+        if (!onScreen(x, y)) continue;
+        const b = makeBurst(x, y, 0.5);
+        b.life = 0.6 + Math.random() * 0.6;
+        ambient.push(b);
+        made++;
+      }
+    } else {
+      for (const p of sweep.riders) releaseRider(p);
+      sweep.riders = [];
+      sweep.active = false;
+    }
+  };
+
+  // Stagger the starting ages so hearts are born and fade at different times
+  const ambient = Array.from({ length: AMBIENT_COUNT }, () => {
+    const p = makeParticle();
+    p.age = Math.random() * p.life;
+    return p;
+  });
 
   const snap = () => {
     state.dx = state.mx;
@@ -185,6 +358,14 @@
     const beat = 1 + 0.05 * Math.pow(Math.max(Math.sin(t * 2.6), 0), 6);
     const scale = HEART_SCALE * beat * (state.pressed ? 0.85 : 1);
 
+    // How fast the cursor is moving (smoothed, px per frame)
+    if (hasTarget) {
+      const moved = Math.hypot(state.dx - (state.pdx ?? state.dx), state.dy - (state.pdy ?? state.dy)) / Math.max(f, 0.5);
+      state.cspeed = (state.cspeed || 0) + (moved - (state.cspeed || 0)) * lerp(0.15);
+    }
+    state.pdx = state.dx;
+    state.pdy = state.dy;
+
     // Magnet influence (0 = free, 1 = fully attracted)
     const members = [];
     let joined = 0;
@@ -192,6 +373,7 @@
 
     for (const p of ambient) {
       p.influence = 0;
+      if (p.burst || p.rider) continue;   // theme-switch hearts ignore the magnet
       if (!hasTarget) {
         // Cursor gone / finger lifted: everyone is released
         p.joined = false;
@@ -204,6 +386,13 @@
       if (d < R) {
         const u = 1 - d / R;
         influence = u * u * (3 - 2 * u);   // smoothstep
+      }
+
+      // Left far behind (cursor moved away): let go instead of chasing it
+      if (p.joined && d > RELEASE_AT) {
+        p.joined = false;
+        p.lockMix = 0;
+        joined--;
       }
 
       // Pulled in close enough: join the heart and stay
@@ -232,8 +421,9 @@
     }
 
     // Add new hearts into the biggest empty gap until the outline is complete
-    state.spawnClock = hasTarget ? (state.spawnClock || 0) + f / 60 : 0;
-    while (hasTarget && joined < MAX_JOINED && state.spawnClock >= SPAWN_EVERY) {
+    const settled = hasTarget && (state.cspeed || 0) < SPAWN_MAX_SPEED;
+    state.spawnClock = settled ? (state.spawnClock || 0) + f / 60 : 0;
+    while (settled && joined < MAX_JOINED && state.spawnClock >= SPAWN_EVERY) {
       state.spawnClock -= SPAWN_EVERY;
 
       let gapAt = Math.random() * TAU;
@@ -269,15 +459,40 @@
       members[i].ty = state.dy + pt.y;
     }
 
-    // Extras fade in while in the heart and fade out (then go) once released
+    // Life cycle: hearts keep fading in and out all over the page
     for (let i = ambient.length - 1; i >= 0; i--) {
       const p = ambient[i];
-      if (!p.extra) continue;
-      p.fade += ((p.joined ? 1 : 0) - p.fade) * lerp(p.joined ? 0.12 : 0.03);
-      if (!p.joined && p.fade < 0.01) ambient.splice(i, 1);
+      if (p.rider) continue;   // riders are driven by the theme sweep
+
+      if (p.burst) {
+        // Pop in fast, fade out, then go
+        p.age += f / 60;
+        p.fade = clamp(Math.min(p.age / 0.12, (p.life - p.age) / 0.8), 0, 1);
+        if (p.age >= p.life) ambient.splice(i, 1);
+        continue;
+      }
+
+      if (p.extra) {
+        // Extras fade in while in the cursor heart and fade out (then go) once released
+        p.fade += ((p.joined ? 1 : 0) - p.fade) * lerp(p.joined ? 0.12 : 0.03);
+        if (!p.joined && p.fade < 0.01) ambient.splice(i, 1);
+        continue;
+      }
+
+      p.age += f / 60;
+      // Hearts held in the cursor heart don't age out
+      if (p.joined) p.age = Math.min(p.age, p.life - FADE_OUT);
+
+      if (p.age >= p.life) {
+        // Reborn somewhere new
+        Object.assign(p, makeParticle());
+        continue;
+      }
+      p.fade = clamp(Math.min(p.age / FADE_IN, (p.life - p.age) / FADE_OUT), 0, 1);
     }
 
     for (const p of ambient) {
+      if (p.rider) continue;
       // Smoothly meandering heading (continuous, no per-frame randomness)
       const heading = p.heading + Math.sin(t * p.wander + p.phase) * 1.2;
       const influence = p.influence;
@@ -336,8 +551,24 @@
     ctx.fill();
   };
 
+  // Soft glowing ring along the edge of the circle while the theme changes
+  const drawSweepGlow = () => {
+    if (!sweep.active || sweep.radius < 1) return;
+    ctx.save();
+    ctx.globalAlpha = 0.75 * Math.sin(Math.PI * Math.min(sweep.progress * 1.1, 1));   // fades in and out
+    ctx.strokeStyle = tone;
+    ctx.lineWidth = 2;
+    ctx.shadowColor = tone;
+    ctx.shadowBlur = 18;
+    ctx.beginPath();
+    ctx.arc(sweep.cx, sweep.cy, sweep.radius, 0, TAU);
+    ctx.stroke();
+    ctx.restore();
+  };
+
   const drawAmbient = () => {
     ctx.clearRect(0, 0, W, H);
+    drawSweepGlow();
     ctx.fillStyle = tone;
 
     for (const p of ambient) {
@@ -371,6 +602,7 @@
         `translate3d(${state.dx - DOT_SIZE / 2}px, ${state.dy - DOT_SIZE / 2}px, 0) scale(${state.dScale})`;
     }
 
+    updateSweep(now, t, lerp);
     updateAmbient(f, t, lerp);
     drawAmbient();
   };
@@ -399,7 +631,11 @@
     dot.classList.toggle("is-active", state.overInteractive);
   };
 
+  const inChat = (e) => !!(e.target && e.target.closest && e.target.closest(".chat"));
+
   const onDown = (e) => {
+    // Touches in the chat are for scrolling and typing, not for the hearts
+    if (isTouch(e) && inChat(e)) return;
     if (isTouch(e)) {
       state.touching = true;
       onMove(e);
