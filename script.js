@@ -39,7 +39,6 @@
   if (!layer || !dot || !ambientLayer) return;
 
   const root = document.documentElement;
-  const finePointer = window.matchMedia("(hover: hover) and (pointer: fine)");
   const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 
   const INTERACTIVE = "a, button, [role='button'], input, textarea, select, summary, label";
@@ -59,7 +58,7 @@
     kScale: 1,
     last: 0, raf: 0,
     overCard: false, overInteractive: false,
-    pressed: false, visible: false, active: false,
+    pressed: false, visible: false, active: false, touching: false,
   };
 
   /* ---------- Floating heart particles (canvas) ---------- */
@@ -306,17 +305,22 @@
   };
 
   /* ---------- Events ---------- */
+  const isTouch = (e) => !!e.pointerType && e.pointerType !== "mouse";
+
   const onMove = (e) => {
-    if (e.pointerType && e.pointerType !== "mouse") return;
+    const touch = isTouch(e);
+    // Touch/pen only attract the hearts while the finger is down
+    if (touch && !state.touching) return;
     state.mx = e.clientX;
     state.my = e.clientY;
 
     if (!state.visible) {
       snap();
       state.visible = true;
-      root.classList.add("has-custom-cursor");
+      if (!touch) root.classList.add("has-custom-cursor");
       layer.classList.add("is-visible");
     }
+    layer.classList.toggle("is-touch", touch);
 
     const target = e.target;
     state.overInteractive = !!(target.closest && target.closest(INTERACTIVE));
@@ -325,12 +329,22 @@
   };
 
   const onDown = (e) => {
-    if (e.pointerType && e.pointerType !== "mouse") return;
+    if (isTouch(e)) {
+      state.touching = true;
+      onMove(e);
+    }
     state.pressed = true;
     spawnClick(e.clientX, e.clientY);
   };
 
-  const onUp = () => { state.pressed = false; };
+  const onUp = (e) => {
+    state.pressed = false;
+    // Lifting the finger releases the hearts
+    if (state.touching && (!e || isTouch(e))) {
+      state.touching = false;
+      state.visible = false;
+    }
+  };
 
   const onLeave = () => {
     state.visible = false;
@@ -379,9 +393,9 @@
     layer.querySelectorAll(".cursor-ripple, .cursor-burst").forEach((n) => n.remove());
   };
 
-  const sync = () => (finePointer.matches && !reduceMotion.matches ? enable() : disable());
+  // Runs on every device (mouse and touch); only reduced-motion turns it off
+  const sync = () => (reduceMotion.matches ? disable() : enable());
   sync();
-  finePointer.addEventListener("change", sync);
   reduceMotion.addEventListener("change", sync);
 })();
 /* ---------- Portrait tilt ---------- */

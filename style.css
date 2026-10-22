@@ -528,10 +528,13 @@ html.has-custom-cursor * {
   .site-footer { font-size: 0.72rem; }
 }
 
-/* Touch devices keep the normal cursor and skip the particles */
+/* Touch: no cursor dot (hearts gather around the finger instead) */
+.cursor-layer.is-touch .cursor-dot { display: none; }
+
 @media (hover: none), (pointer: coarse) {
-  .cursor-layer,
-  .ambient-layer { display: none; }
+  .cursor-dot { display: none; }
+  /* One-finger drags go to the hearts, not to page panning; pinch-zoom still works */
+  body { touch-action: pinch-zoom; }
 }
 
 /* ---------- Reduced motion ---------- */
