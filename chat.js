@@ -7,10 +7,12 @@ const statusBox = document.getElementById("chatStatus");
 
 let initializeApp, getAnalytics, isSupported;
 let getFirestore, collection, addDoc, query, orderBy, limit, onSnapshot, serverTimestamp, getCountFromServer;
+let doc, getDoc, setDoc, updateDoc, getDocs, startAfter;
 try {
   ({ initializeApp } = await import(`${SDK}/firebase-app.js`));
   ({ getAnalytics, isSupported } = await import(`${SDK}/firebase-analytics.js`));
-  ({ getFirestore, collection, addDoc, query, orderBy, limit, onSnapshot, serverTimestamp, getCountFromServer } =
+  ({ getFirestore, collection, addDoc, query, orderBy, limit, onSnapshot, serverTimestamp, getCountFromServer,
+     doc, getDoc, setDoc, updateDoc, getDocs, startAfter } =
     await import(`${SDK}/firebase-firestore.js`));
 } catch (err) {
   console.error(err);
@@ -121,17 +123,15 @@ const detectDevice = async () => {
 let countryPromise = null;
 const detectCountry = () => {
   if (countryPromise) return countryPromise;
-  const cached = (() => { try { return JSON.parse(sessionStorage.getItem("chat-country")); } catch { return null; } })();
-  if (cached) return (countryPromise = Promise.resolve(cached));
-
+  // The IP is only used in memory (to make a one-way visitor code); it's never saved anywhere
   countryPromise = fetch("https://get.geojs.io/v1/ip/country.json")
     .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
-    .then((d) => ({ code: String(d.country || "").slice(0, 2).toUpperCase(), name: String(d.name || "").slice(0, 56) }))
-    .catch(() => ({ code: "", name: "" }))
-    .then((c) => {
-      try { sessionStorage.setItem("chat-country", JSON.stringify(c)); } catch { /* ignore */ }
-      return c;
-    });
+    .then((d) => ({
+      code: String(d.country || "").slice(0, 2).toUpperCase(),
+      name: String(d.name || "").slice(0, 56),
+      ip: String(d.ip || ""),
+    }))
+    .catch(() => ({ code: "", name: "", ip: "" }));
   return countryPromise;
 };
 
@@ -522,7 +522,7 @@ document.addEventListener("keydown", (e) => {
 });
 /* ---------- Visitors (who viewed the page) ---------- */
 const visitsRef = collection(db, "visits");
-const VISITS_SHOWN = 50;
+const VISITS_PAGE = 20;            // visitors per page
 
 const vBtn = document.getElementById("viewersToggle");
 const vPanel = document.getElementById("viewersPanel");
@@ -544,7 +544,7 @@ const showTotal = () => {
   if (totalViews === null) return;
   vCount.classList.remove("is-loading");
   vLabel.textContent = totalViews === 1 ? "visitor" : "visitors";
-  vTotal.textContent = `${totalViews.toLocaleString()} ${totalViews === 1 ? "visit" : "visits"} · one per visitor per day`;
+  vTotal.textContent = `${totalViews.toLocaleString()} unique ${totalViews === 1 ? "visitor" : "visitors"} · most recent first`;
   vBtn.setAttribute("aria-label", `${totalViews.toLocaleString()} visitors. See who viewed this page`);
 
   cancelAnimationFrame(countAnim);
@@ -584,16 +584,38 @@ const deviceKind = (device = "") => {
   return "phone";
 };
 
-let lastVisitDocs = [];
+let liveDocs = [];        // first page, kept live
+let olderDocs = [];       // pages loaded with "Load more"
+let hasMore = false;
+let loadingMore = false;
+
+const allVisitDocs = () => {
+  const live = new Set(liveDocs.map((d) => d.id));
+  return [...liveDocs, ...olderDocs.filter((d) => !live.has(d.id))];
+};
+
+const moreFooter = (shown) => {
+  const li = el("li", "viewers-more");
+  if (totalViews !== null) li.append(el("span", "viewers-shown", `Showing ${shown.toLocaleString()} of ${totalViews.toLocaleString()}`));
+  if (hasMore) {
+    const b = el("button", "viewers-more-btn", loadingMore ? "Loading…" : "Load more");
+    b.type = "button";
+    b.disabled = loadingMore;
+    li.append(b);
+  }
+  return li;
+};
 
 const renderVisits = () => {
-  if (!lastVisitDocs.length) {
+  const docs = allVisitDocs();
+  if (!docs.length) {
     vList.replaceChildren(el("li", "viewers-empty", "No visitors recorded yet."));
     return;
   }
-  vList.replaceChildren(...lastVisitDocs.map((d) => {
+  const items = docs.map((d) => {
     const v = d.data({ serverTimestamps: "estimate" });
-    const date = v.createdAt?.toDate?.();
+    const date = (v.lastSeen || v.createdAt)?.toDate?.();
+    const firstSeen = v.createdAt?.toDate?.();
     const item = el("li", "viewer");
 
     const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
@@ -613,27 +635,86 @@ const renderVisits = () => {
     }
 
     const when = el("time", "viewer-time", ago(date));
-    if (date) { when.dateTime = date.toISOString(); when.title = date.toLocaleString(); }
+    if (date) {
+      when.dateTime = date.toISOString();
+      when.title = `Last visit: ${date.toLocaleString()}` + (firstSeen ? `\nFirst visit: ${firstSeen.toLocaleString()}` : "");
+    }
 
     item.append(icon, info, when);
     return item;
-  }));
+  });
+  vList.replaceChildren(...items, moreFooter(docs.length));
 };
 
-// Record this visit once per browser per day
+// Next page of older visitors
+const loadMore = async () => {
+  if (loadingMore || !hasMore) return;
+  const docs = allVisitDocs();
+  const cursor = docs[docs.length - 1];
+  if (!cursor) return;
+  loadingMore = true;
+  renderVisits();
+  try {
+    const snap = await getDocs(query(visitsRef, orderBy("lastSeen", "desc"), startAfter(cursor), limit(VISITS_PAGE)));
+    olderDocs = olderDocs.concat(snap.docs);
+    hasMore = snap.docs.length === VISITS_PAGE;
+  } catch (err) {
+    console.error(err);
+  } finally {
+    loadingMore = false;
+    renderVisits();
+  }
+};
+
+vList.addEventListener("click", (e) => {
+  if (e.target.closest(".viewers-more-btn")) loadMore();
+});
+
+// Infinite scroll: load the next page when reaching the bottom of the list
+vList.addEventListener("scroll", () => {
+  if (vList.scrollHeight - vList.scrollTop - vList.clientHeight < 60) loadMore();
+}, { passive: true });
+
+// One-way code for an IP address (SHA-256), so the real IP is never stored or shown
+const VISITOR_SALT = "perry-calling-card:v1";
+const hashIp = async (ip) => {
+  if (!ip || !(window.crypto && crypto.subtle)) return "";
+  const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(VISITOR_SALT + ip));
+  return "ip-" + [...new Uint8Array(bytes)].slice(0, 20).map((b) => b.toString(16).padStart(2, "0")).join("");
+};
+
+const randomKey = () =>
+  "b-" + [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, "0")).join("");
+
+// Each visitor is one document. The key is, in order of preference:
+//  1. the key this browser already used (so a changed IP doesn't create a duplicate)
+//  2. a one-way code of the IP (so other browsers on the same IP don't either)
+//  3. a random key for this browser (if the IP lookup failed)
+// A first visit creates the document; later visits only refresh "lastSeen" (at most once a day).
 const recordVisit = async () => {
   const today = new Date().toDateString();
   if (store.get("visit-day", "") === today) return;
   try {
     const [device, country] = await Promise.all([detectDevice(), detectCountry()]);
-    const ref = await addDoc(visitsRef, {
-      device: device.slice(0, 40),
-      country: country.code,
-      countryName: country.name,
-      createdAt: serverTimestamp(),
-    });
+    const key = store.get("visit-key", "") || (await hashIp(country.ip)) || randomKey();
+    const ref = doc(visitsRef, key);
+
+    const existing = await getDoc(ref);
+    if (existing.exists()) {
+      await updateDoc(ref, { lastSeen: serverTimestamp() });
+    } else {
+      await setDoc(ref, {
+        device: device.slice(0, 40),
+        country: country.code,
+        countryName: country.name,
+        createdAt: serverTimestamp(),
+        lastSeen: serverTimestamp(),
+      });
+    }
+
+    store.set("visit-key", key);
     store.set("visit-day", today);
-    myVisits.add(ref.id);
+    myVisits.add(key);
     store.set("visit-mine", [...myVisits].slice(-30));
   } catch (err) {
     console.warn("Visit not recorded:", err.code || err);
@@ -642,7 +723,7 @@ const recordVisit = async () => {
 
 // Total number of views (counted on the server), then kept up to date live
 getCountFromServer(visitsRef)
-  .then((snap) => { totalViews = snap.data().count; showTotal(); })
+  .then((snap) => { totalViews = snap.data().count; showTotal(); renderVisits(); })
   .catch(() => {
     vTotal.textContent = "Recent visitors";
     vCount.classList.remove("is-loading");
@@ -652,14 +733,15 @@ getCountFromServer(visitsRef)
 
 let visitsLoaded = false;
 onSnapshot(
-  query(visitsRef, orderBy("createdAt", "desc"), limit(VISITS_SHOWN)),
+  query(visitsRef, orderBy("lastSeen", "desc"), limit(VISITS_PAGE)),
   (snap) => {
     if (visitsLoaded && totalViews !== null) {
-      totalViews += snap.docChanges().filter((c) => c.type === "added").length;
-      showTotal();
+      // A returning visitor also shows up as "added", so re-count on the server instead
+      getCountFromServer(visitsRef).then((c) => { totalViews = c.data().count; showTotal(); renderVisits(); }).catch(() => {});
     }
     visitsLoaded = true;
-    lastVisitDocs = snap.docs;
+    liveDocs = snap.docs;
+    if (!olderDocs.length) hasMore = snap.docs.length === VISITS_PAGE;
     renderVisits();
   },
   (err) => {

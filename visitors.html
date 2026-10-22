@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="description" content="Everyone who has visited Perry Philip Lozano's page." />
+  <meta name="color-scheme" content="light dark" />
+  <title>Visitors — Perry Philip Lozano</title>
+
+  <!-- Apply the saved theme before anything paints -->
+  <script>
+    try {
+      const t = localStorage.getItem("calling-card-theme") ||
+        (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+      document.documentElement.setAttribute("data-theme", t);
+    } catch { /* ignore */ }
+  </script>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..800&family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="visitors.css" />
+</head>
+<body>
+  <main class="page">
+    <header class="page-head">
+      <a class="back" href="index.html">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6" /></svg>
+        Back
+      </a>
+      <div>
+        <h1 class="title">Visitors</h1>
+        <p class="subtitle">Everyone who has viewed the page, most recently active first. One entry per visitor.</p>
+      </div>
+    </header>
+
+    <section class="stats" aria-label="Summary">
+      <div class="stat">
+        <span class="stat-value" id="statTotal">–</span>
+        <span class="stat-label">Unique visitors</span>
+      </div>
+      <div class="stat">
+        <span class="stat-value" id="statActive">–</span>
+        <span class="stat-label">Active today</span>
+      </div>
+      <div class="stat">
+        <span class="stat-value" id="statNew">–</span>
+        <span class="stat-label">New today</span>
+      </div>
+      <div class="stat">
+        <span class="stat-value" id="statPhones">–</span>
+        <span class="stat-label">On phones (this page)</span>
+      </div>
+    </section>
+
+    <section class="card" aria-labelledby="listTitle">
+      <div class="card-head">
+        <h2 class="card-title" id="listTitle">All visitors</h2>
+        <span class="range" id="range"></span>
+      </div>
+
+      <div class="table-wrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th scope="col" class="col-num">#</th>
+              <th scope="col">Device</th>
+              <th scope="col">Country</th>
+              <th scope="col">First visit</th>
+              <th scope="col">Last visit</th>
+            </tr>
+          </thead>
+          <tbody id="rows">
+            <tr class="row-empty"><td colspan="5">Loading visitors…</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <nav class="pager" aria-label="Pages">
+        <button class="pager-btn" type="button" id="prev" disabled>
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6" /></svg>
+          Previous
+        </button>
+        <span class="pager-info" id="pageInfo">Page 1</span>
+        <button class="pager-btn" type="button" id="next" disabled>
+          Next
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
+        </button>
+      </nav>
+    </section>
+
+    <p class="note">Only the device name and country are recorded, never IP addresses.</p>
+  </main>
+
+  <script src="visitors.js" defer></script>
+</body>
+</html>

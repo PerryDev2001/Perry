@@ -26,22 +26,30 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
-    // Visitors: anyone can read the list and record a visit; nobody can edit or delete.
+    // Visitors: one document per visitor (keyed by a one-way IP code or a browser key).
+    // Anyone can read the list. A first visit creates the document; later visits may only
+    // refresh lastSeen. Nobody can delete.
     match /visits/{visitId} {
       allow read: if true;
 
       allow create: if
-        request.resource.data.keys().hasOnly(['device', 'country', 'countryName', 'createdAt']) &&
-        request.resource.data.keys().hasAll(['device', 'country', 'countryName', 'createdAt']) &&
+        visitId.matches('^(ip|b)-[a-f0-9]{16,64}$') &&
+        request.resource.data.keys().hasOnly(['device', 'country', 'countryName', 'createdAt', 'lastSeen']) &&
+        request.resource.data.keys().hasAll(['device', 'country', 'countryName', 'createdAt', 'lastSeen']) &&
         request.resource.data.device is string &&
         request.resource.data.device.size() <= 40 &&
         request.resource.data.country is string &&
         request.resource.data.country.size() <= 2 &&
         request.resource.data.countryName is string &&
         request.resource.data.countryName.size() <= 56 &&
-        request.resource.data.createdAt == request.time;
+        request.resource.data.createdAt == request.time &&
+        request.resource.data.lastSeen == request.time;
 
-      allow update, delete: if false;
+      allow update: if
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastSeen']) &&
+        request.resource.data.lastSeen == request.time;
+
+      allow delete: if false;
     }
 
     // Everything else is closed.
