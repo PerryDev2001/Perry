@@ -1795,3 +1795,134 @@ button.chip:hover { background: var(--accent); border-color: var(--ring); }
 
 .t-status-btn:hover { text-decoration: underline; text-underline-offset: 2px; }
 .t-status-btn:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: 4px; }
+
+/* ---------- Message actions (react · reply · more) and replies ---------- */
+.t-msg .msg-actions {
+  flex: none;
+  align-self: center;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.t-msg.is-mine .msg-actions { flex-direction: row-reverse; }
+.t-msg:hover .msg-actions,
+.t-msg .msg-actions:focus-within,
+.t-msg .msg-actions:has([aria-expanded="true"]) { opacity: 1; }
+
+.t-msg .msg-act {
+  position: relative;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  color: var(--muted-foreground);
+  background: transparent;
+  border: 0;
+  border-radius: 50%;
+  cursor: pointer;
+  opacity: 1;
+}
+
+.t-msg .msg-act:hover { color: var(--foreground); background: var(--muted); }
+.t-msg .msg-act:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.t-msg .msg-act .icon { width: 16px; height: 16px; }
+
+@media (hover: hover) and (pointer: fine) {
+  .t-msg .msg-act[data-tip]::after {
+    content: attr(data-tip);
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 50%;
+    z-index: 3;
+    padding: 4px 9px;
+    font-size: 11.5px;
+    font-weight: 500;
+    white-space: nowrap;
+    color: var(--background);
+    background: var(--foreground);
+    border-radius: 8px;
+    opacity: 0;
+    transform: translateX(-50%);
+    transition: opacity 0.15s ease;
+    pointer-events: none;
+  }
+
+  .t-msg .msg-act[data-tip]:hover::after { opacity: 1; transition-delay: 0.2s; }
+}
+
+@media (hover: none) { .t-msg .msg-actions { display: none; } }
+
+.msg-reply { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; max-width: 100%; margin-bottom: -6px; }
+.t-msg.is-mine .msg-reply { align-items: flex-end; }
+.msg-reply-label { display: inline-flex; align-items: center; gap: 3px; padding: 0 4px; font-size: 11px; color: var(--muted-foreground); }
+.msg-reply-label .icon { width: 12px; height: 12px; }
+
+.msg-quote {
+  max-width: 100%;
+  padding: 7px 12px 13px;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.4;
+  text-align: left;
+  white-space: pre-wrap;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  color: var(--muted-foreground);
+  background: var(--muted);
+  border: 0;
+  border-left: 3px solid var(--brand);
+  border-radius: calc(var(--radius) + 2px);
+  cursor: pointer;
+}
+
+.t-msg.is-mine .msg-quote { border-left: 0; border-right: 3px solid var(--brand); text-align: right; }
+.msg-quote:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+
+.t-msg.is-flash .t-text { animation: msgFlash 1.3s ease; }
+@keyframes msgFlash {
+  0%, 60% { box-shadow: 0 0 0 3px var(--brand); }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+
+.reply-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: var(--muted);
+  border-top: 1px solid var(--border);
+  border-left: 3px solid var(--brand);
+}
+
+.reply-bar[hidden] { display: none; }
+.reply-bar-icon { flex: none; display: grid; color: var(--brand); }
+.reply-bar-text { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.3; }
+.reply-bar-who { font-size: 12.5px; }
+.reply-bar-snippet { overflow: hidden; font-size: 12px; color: var(--muted-foreground); white-space: nowrap; text-overflow: ellipsis; }
+
+.rx-actions { display: flex; gap: 4px; margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--border); }
+.rx-act {
+  flex: 1;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 12px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--foreground);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+.rx-act:hover, .rx-act:focus-visible { outline: none; background: var(--muted); }
+.rx-act .icon { width: 16px; height: 16px; }

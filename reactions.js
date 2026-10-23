@@ -5,6 +5,9 @@
 (() => {
   const EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
   const LONG_PRESS_MS = 450;
+  const REPLY_ICON = '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg>';
+  const COPY_ICON = '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg>';
+  const MORE_ICON = '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="1.4" fill="currentColor"/><circle cx="12" cy="12" r="1.4" fill="currentColor"/><circle cx="12" cy="19" r="1.4" fill="currentColor"/></svg>';
   const SMILEY_PLUS =
     '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 11.5a8.5 8.5 0 1 1-8-8.5"/><path d="M8.5 14.5a4.5 4.5 0 0 0 7 0"/><path d="M9 9.5h.01M15 9.5h.01"/><path d="M19 2.5v5M16.5 5h5"/></svg>';
 
@@ -63,6 +66,36 @@
     }
 
     const parts = [bar];
+
+    // Reply / Copy (the only way on phones, where there's no hover)
+    const opts = ctl.optsFor(msgId);
+    if (opts && (opts.onReply || opts.copyText)) {
+      const acts = h("div", "rx-actions");
+      if (opts.onReply) {
+        const b = h("button", "rx-act");
+        b.type = "button";
+        b.innerHTML = REPLY_ICON;   // fixed markup
+        b.append(h("span", "", "Reply"));
+        b.addEventListener("click", () => { closePop(); opts.onReply(); });
+        acts.append(b);
+      }
+      if (opts.copyText) {
+        const b = h("button", "rx-act");
+        b.type = "button";
+        b.innerHTML = COPY_ICON;   // fixed markup
+        b.append(h("span", "", "Copy"));
+        b.addEventListener("click", async () => {
+          closePop();
+          try {
+            await navigator.clipboard.writeText(opts.copyText);
+            if (window.showToast) window.showToast("Copied");
+          } catch { /* clipboard blocked */ }
+        });
+        acts.append(b);
+      }
+      parts.push(acts);
+    }
+
     if (list.length) {
       // Who reacted
       const who = h("div", "rx-who");
@@ -125,6 +158,7 @@
     const scope = path.join("/");
     let byMsg = new Map();
     let unsub = null;
+    const optsByMsg = new Map();   // message id -> { onReply, copyText }
 
     const listFor = (id) => byMsg.get(id) || [];
     const myUid = () => me()?.uid || null;
@@ -232,18 +266,21 @@
       if (popFor && popFor.ctl === ctl) closePop();
     };
 
-    // Adds the reaction badges under a message and the react button beside it.
+    // Adds the reaction badges under a message and the actions beside it (react, reply, more).
     // item: the message row, body: the column holding the bubble.
-    const decorate = (item, body, msgId) => {
+    // opts: { onReply(), copyText, who } — Reply / Copy for this message.
+    const decorate = (item, body, msgId, opts = {}) => {
+      optsByMsg.set(msgId, opts);
       const row = h("div", "rx-row");
       row.dataset.rx = msgId;
       row.dataset.rxScope = scope;
       fillRow(row);
       body.append(row);
 
-      const add = h("button", "rx-add");
+      const actions = h("div", "msg-actions");
+      const add = h("button", "rx-add msg-act");
       add.type = "button";
-      add.title = "React";
+      add.dataset.tip = "React";
       add.setAttribute("aria-label", "React to this message");
       add.setAttribute("aria-haspopup", "dialog");
       add.setAttribute("aria-expanded", "false");
@@ -252,7 +289,33 @@
         e.stopPropagation();
         openPop(ctl, msgId, body, add);
       });
-      item.append(add);
+      actions.append(add);
+
+      if (opts.onReply) {
+        const reply = h("button", "msg-act");
+        reply.type = "button";
+        reply.dataset.tip = "Reply";
+        reply.setAttribute("aria-label", `Reply to message${opts.who ? ` from ${opts.who}` : ""}`);
+        reply.innerHTML = REPLY_ICON;   // fixed markup
+        reply.addEventListener("click", (e) => { e.stopPropagation(); opts.onReply(); });
+        actions.append(reply);
+      }
+
+      if (opts.copyText) {
+        const more = h("button", "rx-add msg-act");
+        more.type = "button";
+        more.dataset.tip = "More";
+        more.setAttribute("aria-label", "More actions");
+        more.setAttribute("aria-haspopup", "dialog");
+        more.setAttribute("aria-expanded", "false");
+        more.innerHTML = MORE_ICON;   // fixed markup
+        more.addEventListener("click", (e) => {
+          e.stopPropagation();
+          openPop(ctl, msgId, body, more);
+        });
+        actions.append(more);
+      }
+      item.append(actions);
 
       // Phones and tablets: press and hold the message
       let timer = 0;
@@ -276,7 +339,8 @@
       item.addEventListener("contextmenu", (e) => { if (matchMedia("(pointer: coarse)").matches) e.preventDefault(); });
     };
 
-    const ctl = { start, stop, decorate, toggle, listFor, myUid, refresh };
+    const optsFor = (id) => optsByMsg.get(id) || null;
+    const ctl = { start, stop, decorate, toggle, listFor, myUid, refresh, optsFor };
     return ctl;
   };
 })();

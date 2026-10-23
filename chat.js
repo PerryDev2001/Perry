@@ -205,11 +205,12 @@ const isOwnMsg = (id, m) => {
 };
 const senderKey = (id, m) => (isOwnMsg(id, m) ? "me" : m.admin ? "admin" : `${m.name}|${m.device}|${m.country}`);
 
-const renderMessage = (id, m, { first, last, own = isOwnMsg(id, m), rx = null, status = "" }) => {
+const renderMessage = (id, m, { first, last, own = isOwnMsg(id, m), rx = null, status = "", ctx = "community" }) => {
   const date = m.createdAt?.toDate?.();
   const name = m.admin ? (m.name || profileNameNow()) : (m.name || "Anonymous");
 
   const item = el("li", "msg");
+  item.dataset.mid = id;
   if (own) item.classList.add("is-mine");
   if (!first) item.classList.add("is-cont");
   if (last) item.classList.add("is-last");
@@ -248,6 +249,9 @@ const renderMessage = (id, m, { first, last, own = isOwnMsg(id, m), rx = null, s
     body.append(meta);
   }
 
+  // A reply: who replied to whom + the quoted message (tap it to jump to the original)
+  if (m.replyTo && m.replyTo.text) body.append(replyQuote(m, own, name));
+
   const text = el("p", "msg-text", m.text);
   if (isJumbo(m.text)) item.classList.add("is-jumbo");
   if (date) text.title = date.toLocaleString() + (m.countryName ? ` · ${m.countryName}` : "");
@@ -272,11 +276,18 @@ const renderMessage = (id, m, { first, last, own = isOwnMsg(id, m), rx = null, s
   }
 
   item.append(body);
-  if (rx && !status) rx.decorate(item, body, id);   // reaction badges + react button
+  if (rx && !status) {
+    // Reaction badges + actions beside the bubble (react, reply, more)
+    rx.decorate(item, body, id, {
+      who: own ? "you" : name,
+      copyText: m.text,
+      onReply: () => startReply({ ctx, id, name: own ? "yourself" : name, text: m.text, uid: m.uid || "" }),
+    });
+  }
   return item;
 };
 
-const renderList = (docs, target = list, ownOf = isOwnMsg, rx = chatRx) => {
+const renderList = (docs, target = list, ownOf = isOwnMsg, rx = chatRx, ctx = "community") => {
   const frag = document.createDocumentFragment();
   let prevDate = null;
   const keyOf = (id, m) => (ownOf(id, m) ? "me" : m.admin ? "admin" : `${m.name}|${m.device}|${m.country}`);
@@ -306,7 +317,7 @@ const renderList = (docs, target = list, ownOf = isOwnMsg, rx = chatRx) => {
     const status = d.outbox
       ? (d.outbox.status === "failed" ? "failed" : "sending")
       : (d.metadata && d.metadata.hasPendingWrites ? "sending" : "");
-    frag.append(renderMessage(d.id, m, { first: !sameAs(prev), last: !sameAs(next), own: ownOf(d.id, m), rx, status }));
+    frag.append(renderMessage(d.id, m, { first: !sameAs(prev), last: !sameAs(next), own: ownOf(d.id, m), rx, status, ctx }));
   });
 
   target.replaceChildren(frag);
@@ -695,6 +706,7 @@ const drawCommunity = () => {
   const docs = withOutbox(lastMessageDocs, chatOutbox, (m) => ({
     name: m.meta.name || "",
     text: m.text,
+    replyTo: m.meta.replyTo || null,
     createdAt: { toDate: () => new Date(m.at) },
     ...(chatAdminUid ? { admin: true, uid: chatAdminUid } : {}),
   }));
@@ -721,9 +733,9 @@ const chatOutbox = window.createOutbox ? window.createOutbox({
       const owner = Boolean(chatAdminUid && u.uid === chatAdminUid);
       const batch = writeBatch(db);
       if (owner) {
-        batch.set(ref, { name: profileNameNow().slice(0, 60), text, admin: true, uid: u.uid, createdAt: serverTimestamp() });
+        batch.set(ref, { name: profileNameNow().slice(0, 60), text, admin: true, uid: u.uid, ...withReply(meta), createdAt: serverTimestamp() });
       } else {
-        batch.set(ref, { name: meta.name || "", text, uid: u.uid, ...(await senderInfo()), createdAt: serverTimestamp() });
+        batch.set(ref, { name: meta.name || "", text, uid: u.uid, ...(await senderInfo()), ...withReply(meta), createdAt: serverTimestamp() });
         batch.set(doc(db, "throttle", u.uid), { at: serverTimestamp() });   // server-side spam limit
       }
       await batch.commit();
@@ -751,7 +763,8 @@ form.addEventListener("submit", (e) => {
     setStatus("Couldn't load the chat. Please refresh the page.");
     return;
   }
-  const res = box.send(textInput.value, asOwner ? { thread: ownerInbox.openId } : { name });
+  const replyTo = replyFor(asOwner ? "owner" : priv ? "dm" : "community");
+  const res = box.send(textInput.value, asOwner ? { thread: ownerInbox.openId, replyTo } : { name, replyTo });
   if (!res.ok) {
     const why = window.outboxRefusal(res);
     if (why) setStatus(why);
@@ -763,6 +776,7 @@ form.addEventListener("submit", (e) => {
   }
 
   // Clear right away: the message is already in the conversation
+  clearReply();
   textInput.value = "";
   autoGrow();
   updateComposer();
@@ -784,6 +798,112 @@ list.addEventListener("click", (e) => {
 
 window.addEventListener("offline", () => setStatus("You're offline. Messages will send when you're back online."));
 window.addEventListener("online", () => setStatus(""));
+
+/* ---------- Replies: answer a specific message ---------- */
+// Reply on a message (hover button, or press and hold on phones) shows "Replying to …" above the
+// box; the sent message carries a short copy of the original, shown as a quote above it.
+let replyTarget = null;   // { ctx, id, name, text, uid, thread }
+
+const replyBar = el("div", "reply-bar");
+replyBar.hidden = true;
+const replyIcon = el("span", "reply-bar-icon");
+replyIcon.innerHTML = '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg>';   // fixed markup
+const replyText = el("div", "reply-bar-text");
+const replyWho = el("strong", "reply-bar-who");
+const replySnippet = el("span", "reply-bar-snippet");
+replyText.append(replyWho, replySnippet);
+const replyClose = el("button", "reply-bar-close");
+replyClose.type = "button";
+replyClose.setAttribute("aria-label", "Cancel reply");
+replyClose.innerHTML = '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>';   // fixed markup
+replyBar.append(replyIcon, replyText, replyClose);
+composeEl.before(replyBar);
+
+function currentCtx() {
+  if (chatMode !== "private") return "community";
+  return ownerInbox.active ? "owner" : "dm";
+}
+
+function clearReply() {
+  replyTarget = null;
+  replyBar.hidden = true;
+}
+
+function startReply(target) {
+  replyTarget = { ...target, thread: target.ctx === "owner" ? ownerInbox.openId : null };
+  replyWho.textContent = `Replying to ${target.name}`;
+  replySnippet.textContent = target.text;
+  // Keep the newest messages in view while the bar takes some room
+  const listEl = target.ctx === "community" ? list : dmList;
+  const stick = listEl.scrollHeight - listEl.scrollTop - listEl.clientHeight < 120;
+  replyBar.hidden = false;
+  if (stick) listEl.scrollTop = listEl.scrollHeight;
+  textInput.focus({ preventScroll: true });
+}
+
+// The quote saved with a message (only when replying in this same conversation)
+function replyFor(ctx) {
+  if (!replyTarget || replyTarget.ctx !== ctx) return null;
+  if (ctx === "owner" && replyTarget.thread !== ownerInbox.openId) return null;
+  return {
+    id: String(replyTarget.id).slice(0, 40),
+    name: String(replyTarget.name === "yourself" ? "" : replyTarget.name || "").slice(0, 60),
+    text: String(replyTarget.text || "").slice(0, 140),
+    uid: String(replyTarget.uid || "").slice(0, 128),
+  };
+}
+const withReply = (meta) => (meta && meta.replyTo ? { replyTo: meta.replyTo } : {});
+
+// Who "you" are, to word the label ("replied to you")
+const viewerIds = () => {
+  const s = new Set();
+  const u = getAuth(app).currentUser;
+  if (u) s.add(u.uid);
+  if (chatAdminUid) { s.add(chatAdminUid); s.add("admin"); }
+  return s;
+};
+
+function replyQuote(m, own, name) {
+  const r = m.replyTo;
+  const me = viewerIds();
+  const quoteIsMine = Boolean(r.uid) && me.has(r.uid);
+  const toSelf = Boolean(r.uid) && r.uid === m.uid;
+  const who = own ? "You" : name;
+  const whom = toSelf ? (own ? "yourself" : "themselves") : quoteIsMine ? "you" : (r.name || "a message");
+  const wrap = el("div", "msg-reply");
+  const label = el("span", "msg-reply-label");
+  label.innerHTML = '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg>';   // fixed markup
+  label.append(` ${who} replied to ${whom}`);
+  const quote = el("button", "msg-quote", r.text);
+  quote.type = "button";
+  quote.dataset.jump = r.id;
+  quote.title = "Show the original message";
+  wrap.append(label, quote);
+  return wrap;
+}
+
+replyClose.addEventListener("click", () => { clearReply(); textInput.focus({ preventScroll: true }); });
+textInput.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && replyTarget) { e.stopPropagation(); clearReply(); }
+});
+
+// Tap a quote: scroll to the original message and highlight it
+const jumpTo = (listEl, id) => {
+  const target = listEl.querySelector(`[data-mid="${CSS.escape(id)}"]`);
+  if (!target) {
+    if (window.showToast) window.showToast("The original message isn't loaded here");
+    return;
+  }
+  target.scrollIntoView({ behavior: "smooth", block: "center" });
+  target.classList.remove("is-flash");
+  void target.offsetWidth;
+  target.classList.add("is-flash");
+  setTimeout(() => target.classList.remove("is-flash"), 1400);
+};
+list.addEventListener("click", (e) => {
+  const q = e.target.closest("[data-jump]");
+  if (q) jumpTo(list, q.dataset.jump);
+});
 
 /* ---------- Admin in the chat ---------- */
 const adminNote = el("p", "chat-admin-note");
@@ -914,6 +1034,7 @@ const renderDm = () => {
   const all = withOutbox(dmDocs, dmOutbox, (m) => ({
     from: "visitor",
     text: m.text,
+    replyTo: m.meta.replyTo || null,
     createdAt: { toDate: () => new Date(m.at) },
   }));
   if (!all.length) {
@@ -934,10 +1055,10 @@ const renderDm = () => {
     data: (opts) => {
       const v = d.data(opts);
       const admin = v.from === "admin";
-      return { ...v, admin, name: admin ? profileNameNow() : (nameInput.value.trim() || "You") };
+      return { ...v, admin, uid: admin ? "admin" : (dmUid || ""), name: admin ? profileNameNow() : (nameInput.value.trim() || "You") };
     },
   }));
-  renderList(docs, dmList, (id, m) => !m.admin, dmRx);
+  renderList(docs, dmList, (id, m) => !m.admin, dmRx, "dm");
   for (const d of all) rendered.add(d.id);
   renderKeep();
 };
@@ -1063,6 +1184,7 @@ const setMode = (mode) => {
   dmNote.hidden = !priv;
   setOwnerChrome(ownerInbox.active);
   renderKeep();
+  if (replyTarget && replyTarget.ctx !== currentCtx()) clearReply();
   panel.classList.toggle("is-private", priv);
   if (chatSub) {
     chatSub.textContent = !priv ? "Community Chat · Active now"
@@ -1116,7 +1238,7 @@ dmOutbox = window.createOutbox ? window.createOutbox({
     try {
       const info = await senderInfo();
       const batch = writeBatch(db);
-      batch.set(ref, { from: "visitor", text, createdAt: serverTimestamp() });
+      batch.set(ref, { from: "visitor", text, ...withReply(meta), createdAt: serverTimestamp() });
       batch.set(threadRef, {
         name: meta.name || "Anonymous",
         ...info,
@@ -1218,7 +1340,7 @@ function renderOwnerInbox() {
   av.style.setProperty("--h", hueFor(who));
 
   const box = ownerOutbox ? { list: () => ownerOutbox.list().filter((m) => m.meta.thread === ownerInbox.openId) } : null;
-  const all = withOutbox(ownerInbox.msgs, box, (m) => ({ from: "admin", text: m.text, createdAt: { toDate: () => new Date(m.at) } }));
+  const all = withOutbox(ownerInbox.msgs, box, (m) => ({ from: "admin", text: m.text, replyTo: m.meta.replyTo || null, createdAt: { toDate: () => new Date(m.at) } }));
   if (!all.length) {
     dmList.replaceChildren(el("li", "chat-empty", "No messages in this conversation."));
     return;
@@ -1230,14 +1352,15 @@ function renderOwnerInbox() {
     data: (opts) => {
       const v = d.data(opts);
       const admin = v.from === "admin";
-      return { ...v, admin, name: admin ? profileNameNow() : who };
+      return { ...v, admin, uid: admin ? "admin" : ownerInbox.openId, name: admin ? profileNameNow() : who };
     },
   }));
-  renderList(docs, dmList, (id, m) => Boolean(m.admin), dmRx);
+  renderList(docs, dmList, (id, m) => Boolean(m.admin), dmRx, "owner");
   for (const d of all) rendered.add(d.id);
 }
 
 function openOwnerThread(id) {
+  if (ownerInbox.openId !== id) clearReply();
   if (ownerInbox.unsubMsgs) ownerInbox.unsubMsgs();
   ownerInbox.openId = id;
   ownerInbox.msgs = [];
@@ -1265,6 +1388,7 @@ function openOwnerThread(id) {
 }
 
 function closeOwnerThread() {
+  clearReply();
   if (ownerInbox.unsubMsgs) ownerInbox.unsubMsgs();
   ownerInbox.unsubMsgs = null;
   ownerInbox.openId = null;
@@ -1338,7 +1462,7 @@ const ownerOutbox = window.createOutbox ? window.createOutbox({
     const ref = doc(threadRef, "messages", id);
     try {
       const batch = writeBatch(db);
-      batch.set(ref, { from: "admin", text, createdAt: serverTimestamp() });
+      batch.set(ref, { from: "admin", text, ...withReply(meta), createdAt: serverTimestamp() });
       batch.update(threadRef, {
         lastText: text.slice(0, 120),
         lastFrom: "admin",
@@ -1458,6 +1582,8 @@ getRedirectResult(dmAuth)
   });
 
 dmList.addEventListener("click", (e) => {
+  const q = e.target.closest("[data-jump]");
+  if (q) { jumpTo(dmList, q.dataset.jump); return; }
   const retry = e.target.closest("[data-retry]");
   const remove = e.target.closest("[data-discard]");
   const box = ownerInbox.active ? ownerOutbox : dmOutbox;

@@ -117,6 +117,8 @@ const toast = (() => {
   };
 })();
 
+window.showToast = (text) => toast(text);
+
 /* ---------- Delete confirmation ---------- */
 // Every delete goes through this dialog: it says exactly what will be removed, Cancel is the
 // default, Escape/backdrop cancel, buttons lock while deleting, and it only closes when the
@@ -402,6 +404,78 @@ const statusOf = (d) => (d.outbox
   ? (d.outbox.status === "failed" ? "failed" : "sending")
   : (d.metadata && d.metadata.hasPendingWrites ? "sending" : ""));
 
+/* ---------- Replies (quote a specific message) ---------- */
+// The reply bar above a send box; the quote is saved with the message
+const makeReplyBar = (form, input, scrollEl) => {
+  const bar = el("div", "reply-bar");
+  bar.hidden = true;
+  const icon = el("span", "reply-bar-icon");
+  icon.innerHTML = '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg>';   // fixed markup
+  const textBox = el("div", "reply-bar-text");
+  const who = el("strong", "reply-bar-who");
+  const snippet = el("span", "reply-bar-snippet");
+  textBox.append(who, snippet);
+  const close = el("button", "btn btn-ghost btn-icon btn-sm reply-bar-close");
+  close.type = "button";
+  close.setAttribute("aria-label", "Cancel reply");
+  close.innerHTML = '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>';   // fixed markup
+  bar.append(icon, textBox, close);
+  form.before(bar);
+
+  let target = null;
+  const clear = () => { target = null; bar.hidden = true; };
+  close.addEventListener("click", () => { clear(); input.focus(); });
+  input.addEventListener("keydown", (e) => { if (e.key === "Escape" && target) { e.stopPropagation(); clear(); } });
+  return {
+    set: (t) => {
+      target = t;
+      who.textContent = `Replying to ${t.name}`;
+      snippet.textContent = t.text;
+      // Keep the newest messages in view while the bar takes some room
+      const stick = scrollEl && scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight < 120;
+      bar.hidden = false;
+      if (stick) scrollEl.scrollTop = scrollEl.scrollHeight;
+      input.focus();
+    },
+    quote: () => (target ? {
+      id: String(target.id).slice(0, 40),
+      name: String(target.name === "yourself" ? "" : target.name || "").slice(0, 60),
+      text: String(target.text || "").slice(0, 140),
+      uid: String(target.uid || "").slice(0, 128),
+    } : null),
+    clear,
+  };
+};
+
+// "X replied to Y" + the quoted message (tap it to jump to the original)
+const replyQuote = (m, { own, senderName, senderUid }) => {
+  const r = m.replyTo;
+  const mine = Boolean(r.uid) && (r.uid === user.uid || r.uid === "admin");
+  const toSelf = Boolean(r.uid) && r.uid === senderUid;
+  const who = own ? "You" : senderName;
+  const whom = toSelf ? (own ? "yourself" : "themselves") : mine ? "you" : (r.name || "a message");
+  const wrap = el("div", "msg-reply");
+  const label = el("span", "msg-reply-label");
+  label.innerHTML = '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg>';   // fixed markup
+  label.append(` ${who} replied to ${whom}`);
+  const quote = el("button", "msg-quote", r.text);
+  quote.type = "button";
+  quote.dataset.jump = r.id;
+  quote.title = "Show the original message";
+  wrap.append(label, quote);
+  return wrap;
+};
+
+const jumpTo = (listEl, id) => {
+  const target = listEl.querySelector(`[data-mid="${CSS.escape(id)}"]`);
+  if (!target) { toast("The original message isn't loaded here", "error"); return; }
+  target.scrollIntoView({ behavior: "smooth", block: "center" });
+  target.classList.remove("is-flash");
+  void target.offsetWidth;
+  target.classList.add("is-flash");
+  setTimeout(() => target.classList.remove("is-flash"), 1400);
+};
+
 /* ---------- Message reactions (shared with the public page: reactions.js) ---------- */
 const rxFs = { collection, doc, query, limit, onSnapshot, setDoc, deleteDoc, serverTimestamp };
 const rxMe = () => ({ uid: user.uid, name: profileName, admin: true });
@@ -452,7 +526,7 @@ const chat = (() => {
       const ids = new Set(docs.map((d) => d.id));
       for (const m of outbox.list()) {
         if (ids.has(m.id)) continue;
-        docs.push({ id: m.id, ref: null, outbox: m, data: () => ({ name: profileName, text: m.text, admin: true, uid: user.uid, createdAt: { toDate: () => new Date(m.at) } }) });
+        docs.push({ id: m.id, ref: null, outbox: m, data: () => ({ name: profileName, text: m.text, admin: true, uid: user.uid, replyTo: m.meta.replyTo || null, createdAt: { toDate: () => new Date(m.at) } }) });
       }
       docs.sort((x, y) => sentAt(x) - sentAt(y));
     }
@@ -475,6 +549,7 @@ const chat = (() => {
       const last = !next || key(next) !== key(m) || nextDate - date >= GAP;
 
       const li = el("li", "t-msg");
+      li.dataset.mid = d.id;
       if (isMine(m)) li.classList.add("is-mine");
       if (m.admin) li.classList.add("is-admin");
       if (!first) li.classList.add("is-cont");
@@ -489,6 +564,9 @@ const chat = (() => {
         const where = [m.device, place(m.country, m.countryName)].filter(Boolean).join(" · ");
         if (where) meta.append(el("span", "", where));
         body.append(meta);
+      }
+      if (m.replyTo && m.replyTo.text) {
+        body.append(replyQuote(m, { own: isMine(m), senderName: m.admin ? (m.name || profileName) : (m.name || "Anonymous"), senderUid: m.uid || "" }));
       }
       const row = el("div", "t-bubble-row");
       const text = el("p", "t-text", m.text);
@@ -511,7 +589,14 @@ const chat = (() => {
       body.append(row);
       if (status) body.append(statusLine(d.id, status));
       li.append(body);
-      if (chatRx && !status) chatRx.decorate(li, body, d.id);
+      if (chatRx && !status) {
+        const senderName = isMine(m) ? "yourself" : (m.admin ? (m.name || profileName) : (m.name || "Anonymous"));
+        chatRx.decorate(li, body, d.id, {
+          who: senderName,
+          copyText: m.text,
+          onReply: () => reply.set({ id: d.id, name: senderName, text: m.text, uid: m.uid || "" }),
+        });
+      }
       items.push(li);
       prev = { date, key: key(m) };
     });
@@ -592,10 +677,14 @@ const chat = (() => {
       const failed = outbox.list().find((m) => m.status === "failed");
       if (failed) setMessage(msg, failNote(failed.error));
     },
-    write: async (id, text) => {
+    write: async (id, text, meta) => {
       const mref = doc(ref, id);
       try {
-        await setDoc(mref, { name: profileName.slice(0, 60), text, admin: true, uid: user.uid, createdAt: serverTimestamp() });
+        await setDoc(mref, {
+          name: profileName.slice(0, 60), text, admin: true, uid: user.uid,
+          ...(meta && meta.replyTo ? { replyTo: meta.replyTo } : {}),
+          createdAt: serverTimestamp(),
+        });
       } catch (err) {
         if (await alreadySaved(mref, err)) return;
         throw err;
@@ -603,15 +692,18 @@ const chat = (() => {
     },
   }) : null;
 
+  const reply = makeReplyBar(form, input, scrollEl);
+
   form.addEventListener("submit", (e) => {
     e.preventDefault();
     if (!outbox) return;
-    const res = outbox.send(input.value);
+    const res = outbox.send(input.value, { replyTo: reply.quote() });
     if (!res.ok) {
       const why = window.outboxRefusal(res);
       if (why) setMessage(msg, why);
       return;   // keep what you typed
     }
+    reply.clear();
     input.value = "";
     grow();
     setMessage(msg, navigator.onLine ? "" : "You're offline. Your message will send when you're back online.");
@@ -620,6 +712,8 @@ const chat = (() => {
   });
 
   thread.addEventListener("click", (e) => {
+    const q = e.target.closest("[data-jump]");
+    if (q) { jumpTo(thread, q.dataset.jump); return; }
     const retry = e.target.closest("[data-retry]");
     const remove = e.target.closest("[data-discard]");
     if (!outbox || (!retry && !remove)) return;
@@ -742,7 +836,7 @@ const inbox = (() => {
     const ids = new Set(serverDocs.map((d) => d.id));
     const docs = [...serverDocs, ...(outbox ? outbox.list() : [])
       .filter((m) => m.meta.thread === openId && !ids.has(m.id))
-      .map((m) => ({ id: m.id, outbox: m, data: () => ({ from: "admin", text: m.text, createdAt: { toDate: () => new Date(m.at) } }) }))]
+      .map((m) => ({ id: m.id, outbox: m, data: () => ({ from: "admin", text: m.text, replyTo: m.meta.replyTo || null, createdAt: { toDate: () => new Date(m.at) } }) }))]
       .sort((x, y) => sentAt(x) - sentAt(y));
     if (!docs.length) {
       threadEl.replaceChildren(el("li", "empty center", "No messages in this conversation."));
@@ -763,6 +857,7 @@ const inbox = (() => {
       const mineMsg = m.from === "admin";
 
       const li = el("li", "t-msg");
+      li.dataset.mid = d.id;
       if (mineMsg) li.classList.add("is-mine", "is-admin");
       if (!first) li.classList.add("is-cont");
       if (last) li.classList.add("is-last");
@@ -772,6 +867,9 @@ const inbox = (() => {
         const meta = el("div", "t-meta");
         meta.append(el("strong", "", mineMsg ? profileName : (v.name || "Anonymous")));
         body.append(meta);
+      }
+      if (m.replyTo && m.replyTo.text) {
+        body.append(replyQuote(m, { own: mineMsg, senderName: v.name || "Anonymous", senderUid: mineMsg ? "admin" : openId }));
       }
       const row = el("div", "t-bubble-row");
       const text = el("p", "t-text", m.text);
@@ -784,7 +882,14 @@ const inbox = (() => {
         body.append(statusLine(d.id, status));
       }
       li.append(body);
-      if (dmRx && !status) dmRx.decorate(li, body, d.id);
+      if (dmRx && !status) {
+        const senderName = mineMsg ? "yourself" : (v.name || "Anonymous");
+        dmRx.decorate(li, body, d.id, {
+          who: senderName,
+          copyText: m.text,
+          onReply: () => reply.set({ id: d.id, name: senderName, text: m.text, uid: mineMsg ? "admin" : openId }),
+        });
+      }
       items.push(li);
       prev = { date, from: m.from };
     });
@@ -801,6 +906,7 @@ const inbox = (() => {
   const close = () => {
     if (unsubMsgs) unsubMsgs();
     unsubMsgs = null;
+    if (reply) reply.clear();
     if (dmRx) dmRx.stop();
     dmRx = null;
     openId = null;
@@ -814,6 +920,7 @@ const inbox = (() => {
     const t = threads.find((d) => d.id === id);
     if (!t) return;
     if (unsubMsgs) unsubMsgs();
+    if (reply && openId !== id) reply.clear();
     lastMsgDocs = [];
     if (dmRx) dmRx.stop();
     dmRx = makeRx(["dms", id, "reactions"], (err) => setMessage(msg, errText(err, "react")));
@@ -923,7 +1030,7 @@ const inbox = (() => {
       const mref = doc(threadRef, "messages", id);
       try {
         const batch = writeBatch(db);
-        batch.set(mref, { from: "admin", text, createdAt: serverTimestamp() });
+        batch.set(mref, { from: "admin", text, ...(meta.replyTo ? { replyTo: meta.replyTo } : {}), createdAt: serverTimestamp() });
         batch.update(threadRef, {
           lastText: text.slice(0, 120),
           lastFrom: "admin",
@@ -938,15 +1045,18 @@ const inbox = (() => {
     },
   }) : null;
 
+  const reply = makeReplyBar(form, input, scrollEl);
+
   form.addEventListener("submit", (e) => {
     e.preventDefault();
     if (!outbox || !openId) return;
-    const res = outbox.send(input.value, { thread: openId });
+    const res = outbox.send(input.value, { thread: openId, replyTo: reply.quote() });
     if (!res.ok) {
       const why = window.outboxRefusal(res);
       if (why) setMessage(msg, why);
       return;   // keep what you typed
     }
+    reply.clear();
     input.value = "";
     grow();
     setMessage(msg, navigator.onLine ? "" : "You're offline. Your reply will send when you're back online.");
@@ -955,6 +1065,8 @@ const inbox = (() => {
   });
 
   threadEl.addEventListener("click", (e) => {
+    const q = e.target.closest("[data-jump]");
+    if (q) { jumpTo(threadEl, q.dataset.jump); return; }
     const retry = e.target.closest("[data-retry]");
     const remove = e.target.closest("[data-discard]");
     if (!outbox || (!retry && !remove)) return;

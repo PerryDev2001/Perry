@@ -3954,3 +3954,183 @@ html.theme-switching .switch-knob {
 .dm-inbox-last { overflow: hidden; font-size: 12.5px; color: var(--muted); white-space: nowrap; text-overflow: ellipsis; }
 .dm-inbox-btn.is-unread .dm-inbox-last { font-weight: 700; color: var(--fg); }
 .dm-inbox-dot { flex: none; width: 9px; height: 9px; background: var(--accent-2); border-radius: 50%; }
+
+/* ==========================================================================
+   Message actions (react · reply · more) and replies
+   ========================================================================== */
+.msg .msg-actions {
+  flex: none;
+  align-self: center;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.msg.is-mine .msg-actions { flex-direction: row-reverse; }
+.msg:hover .msg-actions,
+.msg .msg-actions:focus-within,
+.msg .msg-actions:has([aria-expanded="true"]) { opacity: 1; }
+
+.msg .msg-act {
+  position: relative;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  border-radius: 50%;
+  cursor: pointer;
+  opacity: 1;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.msg .msg-act:hover { color: var(--fg); background: var(--hover); }
+.msg .msg-act:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.msg .msg-act .icon { width: 17px; height: 17px; }
+
+/* Tooltip under the action ("React", "Reply", "More") */
+@media (hover: hover) and (pointer: fine) {
+  .msg .msg-act[data-tip]::after {
+    content: attr(data-tip);
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 50%;
+    z-index: 3;
+    padding: 4px 9px;
+    font-size: 11.5px;
+    font-weight: 600;
+    white-space: nowrap;
+    color: var(--bg);
+    background: var(--fg);
+    border-radius: 8px;
+    opacity: 0;
+    transform: translate(-50%, -3px);
+    transition: opacity 0.15s ease, transform 0.2s var(--ease);
+    pointer-events: none;
+  }
+
+  .msg .msg-act[data-tip]:hover::after { opacity: 1; transform: translate(-50%, 0); transition-delay: 0.2s; }
+}
+
+@media (hover: none) { .msg .msg-actions { display: none; } }
+
+/* "Kaspher replied to you" + the quoted message */
+.msg-reply {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  max-width: 100%;
+  margin-bottom: -6px;
+}
+
+.msg.is-mine .msg-reply { align-items: flex-end; }
+
+.msg-reply-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 4px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.msg-reply-label .icon { width: 12px; height: 12px; }
+
+.msg-quote {
+  max-width: 100%;
+  padding: 7px 12px 13px;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.4;
+  text-align: left;
+  white-space: pre-wrap;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  color: var(--muted);
+  background: var(--inset);
+  border: 0;
+  border-left: 3px solid var(--accent-2);
+  border-radius: 14px;
+  opacity: 0.85;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+
+.msg.is-mine .msg-quote { border-left: 0; border-right: 3px solid var(--accent-2); text-align: right; }
+.msg-quote:hover { opacity: 1; }
+.msg-quote:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* The original message flashes when you jump to it */
+.msg.is-flash .msg-text { animation: msgFlash 1.3s ease; }
+@keyframes msgFlash {
+  0%, 60% { box-shadow: 0 0 0 3px var(--accent-2); }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+
+/* "Replying to …" above the send box */
+.reply-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 2px 8px;
+  padding: 8px 6px 8px 12px;
+  background: var(--inset);
+  border-left: 3px solid var(--accent-2);
+  border-radius: 12px;
+}
+
+.reply-bar[hidden] { display: none; }
+.reply-bar-icon { flex: none; display: grid; color: var(--accent-text); }
+.reply-bar-icon .icon { width: 16px; height: 16px; }
+.reply-bar-text { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.3; }
+.reply-bar-who { font-size: 12.5px; }
+.reply-bar-snippet { overflow: hidden; font-size: 12px; color: var(--muted); white-space: nowrap; text-overflow: ellipsis; }
+
+.reply-bar-close {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.reply-bar-close:hover { color: var(--fg); background: var(--hover); }
+.reply-bar-close .icon { width: 15px; height: 15px; }
+
+/* Reply / Copy in the long-press menu */
+.rx-actions { display: flex; gap: 4px; margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--divider); }
+
+.rx-act {
+  flex: 1;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 12px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--fg);
+  background: transparent;
+  border: 0;
+  border-radius: 12px;
+  cursor: pointer;
+}
+
+.rx-act:hover, .rx-act:focus-visible { outline: none; background: var(--hover); }
+.rx-act .icon { width: 16px; height: 16px; }

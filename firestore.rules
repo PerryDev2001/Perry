@@ -34,6 +34,18 @@ service cloud.firestore {
         request.resource.data.at == request.time;
     }
 
+    // A reply's short copy of the message it answers (optional)
+    function validReplyTo(d) {
+      return !('replyTo' in d) || (
+        d.replyTo is map &&
+        d.replyTo.keys().hasOnly(['id', 'name', 'text', 'uid']) &&
+        d.replyTo.keys().hasAll(['id', 'name', 'text', 'uid']) &&
+        d.replyTo.id is string && d.replyTo.id.size() > 0 && d.replyTo.id.size() <= 40 &&
+        d.replyTo.name is string && d.replyTo.name.size() <= 60 &&
+        d.replyTo.text is string && d.replyTo.text.size() <= 140 &&
+        d.replyTo.uid is string && d.replyTo.uid.size() <= 128);
+    }
+
     // Public chat: anyone can read and post; only admins can delete; nobody can edit.
     // Admins can also post as their profile (admin: true), which nobody else can.
     match /messages/{messageId} {
@@ -41,7 +53,8 @@ service cloud.firestore {
 
       allow create: if
         isAdmin() &&
-        request.resource.data.keys().hasOnly(['name', 'text', 'admin', 'uid', 'createdAt']) &&
+        request.resource.data.keys().hasOnly(['name', 'text', 'admin', 'uid', 'replyTo', 'createdAt']) &&
+        validReplyTo(request.resource.data) &&
         request.resource.data.keys().hasAll(['name', 'text', 'admin', 'uid', 'createdAt']) &&
         request.resource.data.admin == true &&
         request.resource.data.uid == request.auth.uid &&
@@ -56,7 +69,8 @@ service cloud.firestore {
       // Visitors post with their (anonymous) sign-in, within the spam limit
       allow create: if
         request.auth != null &&
-        request.resource.data.keys().hasOnly(['name', 'text', 'uid', 'device', 'country', 'countryName', 'createdAt']) &&
+        request.resource.data.keys().hasOnly(['name', 'text', 'uid', 'device', 'country', 'countryName', 'replyTo', 'createdAt']) &&
+        validReplyTo(request.resource.data) &&
         request.resource.data.keys().hasAll(['name', 'text', 'uid', 'device', 'country', 'countryName', 'createdAt']) &&
         request.resource.data.uid == request.auth.uid &&
         throttled() &&
@@ -326,7 +340,8 @@ service cloud.firestore {
 
         allow create: if
           request.auth != null &&
-          request.resource.data.keys().hasOnly(['from', 'text', 'createdAt']) &&
+          request.resource.data.keys().hasOnly(['from', 'text', 'replyTo', 'createdAt']) &&
+          validReplyTo(request.resource.data) &&
           request.resource.data.keys().hasAll(['from', 'text', 'createdAt']) &&
           request.resource.data.text is string &&
           request.resource.data.text.size() > 0 &&
