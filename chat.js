@@ -1506,7 +1506,8 @@ function renderKeep() {
     btn.hidden = false;
   }
   bar.classList.toggle("is-saved", google);
-  bar.hidden = chatMode !== "private" || Boolean(chatAdminUid);
+  // Already saved with Google: nothing to do, so the bar goes away
+  bar.hidden = chatMode !== "private" || Boolean(chatAdminUid) || google;
 }
 
 const googleProvider = () => {
