@@ -225,26 +225,36 @@ service cloud.firestore {
         request.resource.data.updatedAt == request.time;
     }
 
-    // Likes: one per device (anonymous sign-in) per post. The document ID must be
-    // "{post}_{the device's uid}", so a device can't like the same post twice.
-    // Anyone can read; a device can only add or remove its own like.
+    // Post reactions (likes): one per person (sign-in) per post — 👍 like, ❤️ heart, 😂 haha, 😮 wow.
+    // The document ID must be "{post}_{the person's uid}", so nobody can react twice to a post.
+    // Anyone can read; a person can only add, change or remove their own reaction.
+    function validLike(d, likeId) {
+      return d.keys().hasOnly(['post', 'uid', 'device', 'type', 'createdAt']) &&
+        d.keys().hasAll(['post', 'uid', 'device', 'createdAt']) &&
+        d.uid == request.auth.uid &&
+        d.post is string &&
+        d.post.size() > 0 &&
+        d.post.size() <= 40 &&
+        likeId == d.post + '_' + request.auth.uid &&
+        d.device is string &&
+        d.device.size() <= 40 &&
+        (!('type' in d) || d.type in ['like', 'heart', 'haha', 'wow']) &&
+        d.createdAt == request.time;
+    }
+
     match /likes/{likeId} {
       allow read: if true;
 
       allow create: if
         request.auth != null &&
-        request.resource.data.keys().hasOnly(['post', 'uid', 'device', 'createdAt']) &&
-        request.resource.data.keys().hasAll(['post', 'uid', 'device', 'createdAt']) &&
-        request.resource.data.uid == request.auth.uid &&
-        request.resource.data.post is string &&
-        request.resource.data.post.size() > 0 &&
-        request.resource.data.post.size() <= 40 &&
-        likeId == request.resource.data.post + '_' + request.auth.uid &&
-        request.resource.data.device is string &&
-        request.resource.data.device.size() <= 40 &&
-        request.resource.data.createdAt == request.time;
+        validLike(request.resource.data, likeId);
 
-      allow update: if false;
+      // Changing your reaction (e.g. 👍 → ❤️)
+      allow update: if
+        request.auth != null &&
+        resource.data.uid == request.auth.uid &&
+        validLike(request.resource.data, likeId);
+
       allow delete: if
         isAdmin() ||
         (request.auth != null && resource.data.uid == request.auth.uid);

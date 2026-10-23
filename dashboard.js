@@ -404,6 +404,17 @@ const statusOf = (d) => (d.outbox
   ? (d.outbox.status === "failed" ? "failed" : "sending")
   : (d.metadata && d.metadata.hasPendingWrites ? "sending" : ""));
 
+/* ---------- Emoji picker in a send box (shared: emoji.js) ---------- */
+const addEmojiPicker = (form, input, sendBtn) => {
+  if (!window.createEmojiPicker) return { close() {} };
+  const picker = window.createEmojiPicker({ input, max: input.maxLength || 1000 });
+  picker.picker.classList.add("admin-emoji-picker");
+  form.classList.add("has-emoji");
+  form.insertBefore(picker.toggle, sendBtn);
+  form.append(picker.picker);
+  return picker;
+};
+
 /* ---------- Replies (quote a specific message) ---------- */
 // The reply bar above a send box; the quote is saved with the message
 const makeReplyBar = (form, input, scrollEl) => {
@@ -693,9 +704,11 @@ const chat = (() => {
   }) : null;
 
   const reply = makeReplyBar(form, input, scrollEl);
+  const emoji = addEmojiPicker(form, input, send);
 
   form.addEventListener("submit", (e) => {
     e.preventDefault();
+    emoji.close();
     if (!outbox) return;
     const res = outbox.send(input.value, { replyTo: reply.quote() });
     if (!res.ok) {
@@ -1046,9 +1059,11 @@ const inbox = (() => {
   }) : null;
 
   const reply = makeReplyBar(form, input, scrollEl);
+  const emoji = addEmojiPicker(form, input, send);
 
   form.addEventListener("submit", (e) => {
     e.preventDefault();
+    emoji.close();
     if (!outbox || !openId) return;
     const res = outbox.send(input.value, { thread: openId, replyTo: reply.quote() });
     if (!res.ok) {
@@ -1324,7 +1339,7 @@ const loaders = {
       const likeBtn = el("button", "chip");
       likeBtn.type = "button";
       likeBtn.setAttribute("aria-expanded", "false");
-      const likeLabel = el("span", "", "0 likes");
+      const likeLabel = el("span", "", "0 reactions");
       likeBtn.append(svg(HEART), likeLabel, svg(CHEV, "icon chip-chev"));
       const commentChip = el("span", "chip chip-static");
       const commentLabel = el("span", "", "0 comments");
@@ -1347,13 +1362,19 @@ const loaders = {
         query(collection(db, "likes"), where("post", "==", post.id)),
         (snap) => {
           const n = snap.size;
-          likeLabel.textContent = `${n.toLocaleString()} ${n === 1 ? "like" : "likes"}`;
+          // "👍 3 ❤️ 2 · 5 reactions"
+          const kinds = { like: "👍", heart: "❤️", haha: "😂", wow: "😮" };
+          const tally = {};
+          for (const d of snap.docs) { const t = kinds[d.data().type] ? d.data().type : "like"; tally[t] = (tally[t] || 0) + 1; }
+          const parts = Object.keys(kinds).filter((k) => tally[k]).map((k) => `${kinds[k]} ${tally[k]}`);
+          likeLabel.textContent = `${parts.length ? `${parts.join("  ")} · ` : ""}${n.toLocaleString()} ${n === 1 ? "reaction" : "reactions"}`;
           const docs = snap.docs.slice().sort((a, b) => time(b.data()) - time(a.data()));
           likePanel.replaceChildren(...(docs.length
             ? docs.map((d) => {
               const v = d.data();
               const li = el("li", "like-row");
-              li.append(svg(HEART, "icon like-heart"), el("span", "", v.device || "Unknown device"), el("span", "row-time", ago(v.createdAt?.toDate?.())));
+              const emoji = { like: "👍", heart: "❤️", haha: "😂", wow: "😮" }[v.type] || "👍";
+              li.append(el("span", "like-emoji", emoji), el("span", "", v.device || "Unknown device"), el("span", "row-time", ago(v.createdAt?.toDate?.())));
               return li;
             })
             : [el("li", "empty", "No likes yet.")]));

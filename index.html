@@ -146,8 +146,8 @@
 
           <div class="post-actions">
             <button class="post-action" type="button" id="postLike" data-like-btn="pinned" aria-pressed="false">
-              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20.5s-7.5-4.6-9.6-9.2C.9 7.9 3 4 6.8 4c2.1 0 3.6 1.1 5.2 3 1.6-1.9 3.1-3 5.2-3 3.8 0 5.9 3.9 4.4 7.3-2.1 4.6-9.6 9.2-9.6 9.2Z" /></svg>
-              Like
+              <span class="react-ico"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10v11H4a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1h3Zm0 0 4-7a2.5 2.5 0 0 1 2.9 2.9L13 10h5.6a2 2 0 0 1 2 2.4l-1.5 7A2 2 0 0 1 17.1 21H7" /></svg></span>
+              <span class="react-label">Like</span>
             </button>
             <button class="post-action" type="button" data-comment-btn="pinned" aria-expanded="false">
               <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 9.3 9.3 0 0 1-3.6-.7L3 21l1.6-4.6A8 8 0 0 1 3 11.5 8.6 8.6 0 0 1 12 3a8.6 8.6 0 0 1 9 8.5Z" /></svg>
@@ -251,10 +251,8 @@
           <input class="chat-name" id="chatName" type="text" maxlength="24" placeholder="Anonymous" autocomplete="nickname" />
         </label>
 
-        <div class="emoji-picker" id="emojiPicker" role="dialog" aria-label="Choose an emoji" hidden>
-          <div class="emoji-tabs" id="emojiTabs" role="tablist"></div>
-          <div class="emoji-grid" id="emojiGrid"></div>
-        </div>
+        <!-- Emoji picker (built by emoji.js) -->
+        <div id="emojiPicker" hidden></div>
 
         <div class="chat-compose" id="chatCompose">
           <div class="chat-input">
@@ -286,6 +284,7 @@
   </div>
 
   <script src="script.js"></script>
+  <script src="emoji.js" defer></script>
   <script src="outbox.js" defer></script>
   <script src="notify.js" defer></script>
   <script src="reactions.js" defer></script>

@@ -4,6 +4,12 @@
 // again removes it, picking another one changes it. firestore.rules enforce the same.
 (() => {
   const EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🙏"];
+  // The device's own emoji (Apple, Google, Microsoft…), like in the messages
+  const emojiSpan = (e, cls) => {
+    const s = h("span", `${cls} emoji-native`, e);
+    s.setAttribute("aria-hidden", "true");
+    return s;
+  };
   const LONG_PRESS_MS = 450;
   const REPLY_ICON = '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg>';
   const COPY_ICON = '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></svg>';
@@ -52,7 +58,7 @@
     bar.setAttribute("role", "group");
     bar.setAttribute("aria-label", "Reactions");
     for (const e of EMOJIS) {
-      const b = h("button", "rx-pick", e);
+      const b = h("button", "rx-pick emoji-native", e);
       b.type = "button";
       const on = e === myEmoji;
       if (on) b.classList.add("is-selected");
@@ -104,7 +110,7 @@
       for (const r of list) {
         const li = h("li");
         const isMe = r.uid === mine;
-        li.append(h("span", "rx-emoji", r.emoji), h("span", "rx-name", isMe ? "You" : (r.name || "Anonymous")));
+        li.append(emojiSpan(r.emoji, "rx-emoji"), h("span", "rx-name", isMe ? "You" : (r.name || "Anonymous")));
         if (isMe) li.append(h("span", "rx-hint", "Tap it again to remove"));
         else if (r.admin) li.append(h("span", "rx-hint", "Owner"));
         ul.append(li);
@@ -179,7 +185,7 @@
         chip.type = "button";
         const isMine = people.some((p) => p.uid === mine);
         if (isMine) chip.classList.add("is-mine");
-        chip.append(h("span", "rx-emoji", emoji));
+        chip.append(emojiSpan(emoji, "rx-emoji"));
         if (people.length > 1) chip.append(h("span", "rx-count", String(people.length)));
         const names = people.map((p) => (p.uid === mine ? "You" : (p.name || "Anonymous"))).join(", ");
         chip.title = names;

@@ -410,219 +410,14 @@ onSnapshot(
   }
 );
 
-/* ---------- Emoji picker ---------- */
-const picker = document.getElementById("emojiPicker");
-const pickerTabs = document.getElementById("emojiTabs");
-const pickerGrid = document.getElementById("emojiGrid");
-const emojiBtn = document.getElementById("emojiToggle");
-
-const EMOJI = [
-  { icon: "🕘", label: "Recent", list: [] },
-  { icon: "😀", label: "Smileys", list: "😀 😃 😄 😁 😆 😅 🤣 😂 🙂 😉 😊 😇 🥰 😍 🤩 😘 😗 😚 😙 🥲 😋 😛 😜 🤪 😝 🤗 🤭 🤫 🤔 🤐 🤨 😐 😑 😶 😏 😒 🙄 😬 😮‍💨 🤥 😌 😔 😪 🤤 😴 😷 🤒 🤕 🤢 🤮 🥵 🥶 🥴 😵 🤯 🤠 🥳 🥸 😎 🤓 🧐 😕 😟 🙁 😮 😯 😲 😳 🥺 🥹 😦 😧 😨 😰 😥 😢 😭 😱 😖 😣 😞 😓 😩 😫 🥱 😤 😡 😠 🤬 😈 👿 💀 💩 🤡 👻 👽 🤖".split(" ") },
-  { icon: "❤️", label: "Hearts", list: "❤️ 🧡 💛 💚 💙 💜 🤎 🖤 🤍 🩷 🩵 🩶 ❤️‍🔥 ❤️‍🩹 💕 💞 💓 💗 💖 💘 💝 💟 ❣️ 💔 💌 💋 😻 🥰 😍 😘 💐 🌹".split(" ") },
-  { icon: "👋", label: "Gestures", list: "👋 🤚 🖐️ ✋ 🖖 👌 🤌 🤏 ✌️ 🤞 🫰 🤟 🤘 🤙 👈 👉 👆 👇 ☝️ 🫵 👍 👎 ✊ 👊 🤛 🤜 👏 🙌 🫶 👐 🤲 🤝 🙏 ✍️ 💪 🫡 🙋 🙆 🙅 🤷 🤦 🙇".split(" ") },
-  { icon: "🐶", label: "Nature", list: "🐶 🐱 🐭 🐹 🐰 🦊 🐻 🐼 🐨 🐯 🦁 🐮 🐷 🐸 🐵 🐔 🐧 🐦 🐤 🦄 🐝 🦋 🐢 🐍 🐙 🐬 🐳 🦈 🌸 🌼 🌻 🌺 🌷 🍀 🌿 🌵 🌴 🍁 🌈 ☀️ 🌙 ⭐ 🌟 ✨ ⚡ 🔥 💧 🌊 ❄️ ☃️".split(" ") },
-  { icon: "🍔", label: "Food", list: "🍎 🍓 🍒 🍑 🥭 🍍 🍌 🍉 🍇 🥑 🍅 🌽 🥕 🍞 🧀 🍳 🥓 🍔 🍟 🍕 🌭 🌮 🌯 🍜 🍝 🍣 🍱 🍚 🍛 🍤 🍙 🍰 🎂 🧁 🍩 🍪 🍫 🍬 🍭 🍦 ☕ 🧋 🍵 🥤 🍺 🍻 🥂 🍷".split(" ") },
-  { icon: "⚽", label: "Activities", list: "⚽ 🏀 🏈 ⚾ 🎾 🏐 🏓 🏸 🥊 🏆 🥇 🎯 🎮 🕹️ 🎲 🧩 🎨 🎬 🎤 🎧 🎸 🎹 🥁 🎉 🎊 🎈 🎁 🎀 🪄 🏃 🚴 🏊 🧘 💃 🕺".split(" ") },
-  { icon: "💡", label: "Objects", list: "💻 🖥️ ⌨️ 🖱️ 📱 📷 🎥 💡 🔦 📚 📖 ✏️ 📝 📌 📎 ✂️ 🔒 🔑 🧠 💼 🗂️ 📅 ⏰ ⌛ 💰 💎 🛠️ ⚙️ 🧪 🚀 ✈️ 🚗 🏠 🌍 🗺️ ✅ ❌ ⚠️ ❓ ❗ 💯 🔔 🎵 💬 💭 👀 🙈 🙉 🙊".split(" ") },
-];
-
-const RECENT_MAX = 24;
-EMOJI[0].list = store.get("chat-emoji-recent", []);
-
-let activeCat = EMOJI[0].list.length ? 0 : 1;
-
-const insertAtCaret = (str) => {
-  const start = textInput.selectionStart ?? textInput.value.length;
-  const end = textInput.selectionEnd ?? textInput.value.length;
-  const next = textInput.value.slice(0, start) + str + textInput.value.slice(end);
-  if (next.length > MAX_TEXT) return;
-  textInput.value = next;
-  const caret = start + str.length;
-  textInput.setSelectionRange(caret, caret);
-  textInput.dispatchEvent(new Event("input"));
-};
-
-const remember = (emoji) => {
-  const recent = [emoji, ...EMOJI[0].list.filter((e) => e !== emoji)].slice(0, RECENT_MAX);
-  EMOJI[0].list = recent;
-  store.set("chat-emoji-recent", recent);
-};
-
-const renderGrid = () => {
-  const cat = EMOJI[activeCat];
-  pickerGrid.replaceChildren();
-  pickerGrid.setAttribute("aria-label", cat.label);
-  if (!cat.list.length) {
-    pickerGrid.append(el("p", "emoji-empty", "Emoji you use will show up here."));
-    return;
-  }
-  for (const emoji of cat.list) {
-    const b = el("button", "emoji", emoji);
-    b.type = "button";
-    b.setAttribute("aria-label", emoji);
-    pickerGrid.append(b);
-  }
-};
-
-const renderTabs = () => {
-  pickerTabs.replaceChildren(
-    ...EMOJI.map((cat, i) => {
-      const t = el("button", "emoji-tab", cat.icon);
-      t.type = "button";
-      t.setAttribute("role", "tab");
-      t.setAttribute("aria-label", cat.label);
-      t.setAttribute("aria-selected", String(i === activeCat));
-      t.dataset.cat = i;
-      return t;
-    })
-  );
-};
-
-pickerTabs.addEventListener("click", (e) => {
-  const tab = e.target.closest(".emoji-tab");
-  if (!tab) return;
-  activeCat = +tab.dataset.cat;
-  renderTabs();
-  renderGrid();
-  pickerGrid.scrollTop = 0;
-});
-
-pickerGrid.addEventListener("click", (e) => {
-  const b = e.target.closest(".emoji");
-  if (!b) return;
-  const emoji = b.textContent;
-  insertAtCaret(emoji);
-  remember(emoji);
-  b.animate([{ transform: "scale(1.35)" }, { transform: "scale(1)" }], { duration: 250, easing: "ease-out" });
-});
-
-const pickerOpen = () => !picker.hidden;
-
-const openPicker = () => {
-  if (EMOJI[0].list.length && activeCat === 1 && !picker.dataset.seen) activeCat = 0;
-  picker.dataset.seen = "1";
-  renderTabs();
-  renderGrid();
-  picker.hidden = false;
-  requestAnimationFrame(() => picker.classList.add("is-open"));
-  emojiBtn.setAttribute("aria-expanded", "true");
-  emojiBtn.classList.add("is-active");
-};
-
-const closePicker = () => {
-  picker.classList.remove("is-open");
-  picker.hidden = true;
-  emojiBtn.setAttribute("aria-expanded", "false");
-  emojiBtn.classList.remove("is-active");
-};
-
-emojiBtn.addEventListener("click", () => {
-  if (pickerOpen()) closePicker(); else openPicker();
-  if (window.matchMedia("(hover: hover)").matches) textInput.focus();
-});
-
-// Close the picker when clicking elsewhere
-document.addEventListener("pointerdown", (e) => {
-  if (pickerOpen() && !picker.contains(e.target) && !emojiBtn.contains(e.target)) closePicker();
-});
-
-// The same picker for any other text box (comments, posts). Shares the "Recent" list.
-const SMILEY_SVG = '<svg class="icon icon-fill" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm-3.5 7a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3Zm7 0a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3ZM12 18a5.5 5.5 0 0 1-5-3.2h10A5.5 5.5 0 0 1 12 18Z"/></svg>';
-
-const buildEmojiPicker = ({ input, max }) => {
-  const toggle = el("button", "chat-emoji-btn");
-  toggle.type = "button";
-  toggle.setAttribute("aria-label", "Add emoji");
-  toggle.setAttribute("aria-expanded", "false");
-  toggle.innerHTML = SMILEY_SVG;   // fixed markup
-
-  const box = el("div", "emoji-picker inline-emoji-picker");
-  box.setAttribute("role", "dialog");
-  box.setAttribute("aria-label", "Choose an emoji");
-  box.hidden = true;
-  const tabs = el("div", "emoji-tabs");
-  tabs.setAttribute("role", "tablist");
-  const grid = el("div", "emoji-grid");
-  box.append(tabs, grid);
-
-  let cat = EMOJI[0].list.length ? 0 : 1;
-  const drawTabs = () => {
-    tabs.replaceChildren(...EMOJI.map((cg, i) => {
-      const t = el("button", "emoji-tab", cg.icon);
-      t.type = "button";
-      t.setAttribute("role", "tab");
-      t.setAttribute("aria-label", cg.label);
-      t.setAttribute("aria-selected", String(i === cat));
-      t.dataset.cat = i;
-      return t;
-    }));
-  };
-  const drawGrid = () => {
-    const cg = EMOJI[cat];
-    grid.setAttribute("aria-label", cg.label);
-    if (!cg.list.length) {
-      grid.replaceChildren(el("p", "emoji-empty", "Emoji you use will show up here."));
-      return;
-    }
-    grid.replaceChildren(...cg.list.map((emoji) => {
-      const b = el("button", "emoji", emoji);
-      b.type = "button";
-      b.setAttribute("aria-label", emoji);
-      return b;
-    }));
-  };
-  const isOpen = () => !box.hidden;
-  const open = () => {
-    if (EMOJI[0].list.length && !box.dataset.seen) cat = 0;
-    box.dataset.seen = "1";
-    drawTabs();
-    drawGrid();
-    box.hidden = false;
-    void box.offsetWidth;
-    box.classList.add("is-open");
-    toggle.setAttribute("aria-expanded", "true");
-    toggle.classList.add("is-active");
-  };
-  const close = () => {
-    box.classList.remove("is-open");
-    box.hidden = true;
-    toggle.setAttribute("aria-expanded", "false");
-    toggle.classList.remove("is-active");
-  };
-
-  toggle.addEventListener("click", () => {
-    if (isOpen()) close(); else open();
-    if (matchMedia("(hover: hover)").matches) input.focus();
-  });
-  tabs.addEventListener("click", (e) => {
-    const t = e.target.closest(".emoji-tab");
-    if (!t) return;
-    cat = +t.dataset.cat;
-    drawTabs();
-    drawGrid();
-    grid.scrollTop = 0;
-  });
-  grid.addEventListener("click", (e) => {
-    const b = e.target.closest(".emoji");
-    if (!b) return;
-    const emoji = b.textContent;
-    const start = input.selectionStart ?? input.value.length;
-    const end = input.selectionEnd ?? input.value.length;
-    const next = input.value.slice(0, start) + emoji + input.value.slice(end);
-    if (next.length > max) return;
-    input.value = next;
-    input.setSelectionRange(start + emoji.length, start + emoji.length);
-    input.dispatchEvent(new Event("input"));
-    remember(emoji);
-    b.animate([{ transform: "scale(1.35)" }, { transform: "scale(1)" }], { duration: 250, easing: "ease-out" });
-  });
-  document.addEventListener("pointerdown", (e) => {
-    if (isOpen() && !box.contains(e.target) && !toggle.contains(e.target)) close();
-  });
-
-  return { toggle, picker: box, close };
-};
+/* ---------- Emoji picker (shared with every emoji box: emoji.js) ---------- */
+// Native emoji with categories, search, recently used and skin tones
+const buildEmojiPicker = (opts) => window.createEmojiPicker(opts);
+const chatEmoji = buildEmojiPicker({ input: textInput, max: MAX_TEXT, toggle: document.getElementById("emojiToggle") });
+chatEmoji.picker.id = "emojiPicker";
+document.getElementById("emojiPicker").replaceWith(chatEmoji.picker);
+const pickerOpen = () => chatEmoji.isOpen();
+const closePicker = () => chatEmoji.close();
 
 /* ---------- Composer state: counter + send button ---------- */
 const countEl = document.getElementById("chatCount");
@@ -2591,15 +2386,43 @@ const HEART_PATH = "M12 20.5s-7.5-4.6-9.6-9.2C.9 7.9 3 4 6.8 4c2.1 0 3.6 1.1 5.2
 
 const likeId = (postId, uid) => `${postId}_${uid}`;
 
+// Post reactions (one per person per post; older likes without a type count as "like")
+const POST_REACTIONS = {
+  like: { emoji: "👍", label: "Like" },
+  heart: { emoji: "❤️", label: "Heart" },
+  haha: { emoji: "😂", label: "Haha" },
+  wow: { emoji: "😮", label: "Wow" },
+};
+const reactionOf = (v) => (POST_REACTIONS[v && v.type] ? v.type : "like");
+
+// The device's own emoji (Apple, Google, Microsoft…), like in the messages
+const reactEmoji = (type, cls = "react-emoji") => {
+  const s = el("span", cls, POST_REACTIONS[type].emoji);
+  s.setAttribute("aria-hidden", "true");
+  return s;
+};
+const THUMB_ICON = '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10v11H4a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1h3Zm0 0 4-7a2.5 2.5 0 0 1 2.9 2.9L13 10h5.6a2 2 0 0 1 2 2.4l-1.5 7A2 2 0 0 1 17.1 21H7"/></svg>';
+
 const renderLikes = (postId) => {
   const st = likeState.get(postId);
   const docs = st ? st.docs : [];
   const count = docs.length;
-  const mine = Boolean(likeUid && docs.some((d) => d.data().uid === likeUid));
+  const myDoc = likeUid ? docs.find((d) => d.data().uid === likeUid) : null;
+  const mine = Boolean(myDoc);
+  const myType = myDoc ? reactionOf(myDoc.data()) : null;
 
+  // The button shows your reaction (or a plain "Like")
   for (const btn of document.querySelectorAll(`[data-like-btn="${CSS.escape(postId)}"]`)) {
     btn.setAttribute("aria-pressed", String(mine));
-    btn.setAttribute("aria-label", mine ? "Unlike" : "Like");
+    btn.setAttribute("aria-label", mine ? `Remove your ${POST_REACTIONS[myType].label} reaction` : "Like (hold for more reactions)");
+    for (const k of Object.keys(POST_REACTIONS)) btn.classList.toggle(`is-${k}`, myType === k);
+    if (btn.dataset.shown !== (myType || "none")) {
+      btn.dataset.shown = myType || "none";
+      const ico = el("span", "react-ico");
+      if (myType) ico.append(reactEmoji(myType));
+      else ico.innerHTML = THUMB_ICON;   // fixed markup
+      btn.replaceChildren(ico, el("span", "react-label", myType ? POST_REACTIONS[myType].label : "Like"));
+    }
   }
 
   for (const stats of document.querySelectorAll(`[data-like-stats="${CSS.escape(postId)}"]`)) {
@@ -2612,20 +2435,28 @@ const renderLikes = (postId) => {
       stats.removeAttribute("aria-label");
       continue;
     }
-    // Anyone can open the list of who liked it
+    // Anyone can open the list of who reacted
     stats.setAttribute("role", "button");
     stats.tabIndex = 0;
-    stats.setAttribute("aria-label", "See who liked this");
+    stats.setAttribute("aria-label", "See who reacted");
 
-    const dot = el("span", "like-dot");
-    dot.innerHTML = `<svg class="icon icon-fill" viewBox="0 0 24 24" aria-hidden="true"><path d="${HEART_PATH}"/></svg>`;   // fixed markup
+    // The most used reactions, overlapping
+    const tally = new Map();
+    for (const d of docs) { const t = reactionOf(d.data()); tally.set(t, (tally.get(t) || 0) + 1); }
+    const stack = el("span", "react-stack");
+    for (const [t] of [...tally].sort((a, b) => b[1] - a[1]).slice(0, 3)) {
+      const e = el("span", "react-stack-emoji");
+      e.append(reactEmoji(t));
+      e.title = `${POST_REACTIONS[t].label} · ${tally.get(t)}`;
+      stack.append(e);
+    }
     const others = count - (mine ? 1 : 0);
     const text = mine
-      ? (others ? `You and ${others.toLocaleString()} ${others === 1 ? "other" : "others"}` : "You liked this")
-      : `${count.toLocaleString()} ${count === 1 ? "like" : "likes"}`;
-    stats.append(dot, text);
+      ? (others ? `You and ${others.toLocaleString()} ${others === 1 ? "other" : "others"}` : "You")
+      : count.toLocaleString();
+    stats.append(stack, el("span", "react-count", text));
 
-    stats.title = "See who liked this";
+    stats.title = "See who reacted";
   }
 
   if (postDialog.is(`likes:${postId}`)) fillLikers(postId);
@@ -2635,13 +2466,16 @@ const renderLikes = (postId) => {
 const likers = (() => {
   const wrap = el("section", "likers");
   const head = el("div", "comments-head");
-  const title = el("h3", "comments-title", "Liked by");
+  const title = el("h3", "comments-title", "Reactions");
   const badge = el("span", "comments-badge", "0");
   title.append(badge);
   head.append(title);
+  const tabs = el("div", "react-tabs");
+  tabs.setAttribute("role", "tablist");
+  tabs.setAttribute("aria-label", "Filter reactions");
   const list = el("ul", "liker-list");
-  wrap.append(head, list);
-  return { wrap, badge, list };
+  wrap.append(head, tabs, list);
+  return { wrap, badge, tabs, list, filter: "all", postId: null };
 })();
 
 // Device name -> brand, type and logo (for the "Liked by" list)
@@ -2672,13 +2506,38 @@ const deviceInfo = (device = "") => {
 
 const fillLikers = (postId) => {
   const st = likeState.get(postId);
-  const docs = (st ? st.docs : []).slice().sort((a, b) => {
+  if (likers.postId !== postId) { likers.postId = postId; likers.filter = "all"; }
+  const all = (st ? st.docs : []).slice().sort((a, b) => {
     const t = (d) => d.data({ serverTimestamps: "estimate" }).createdAt?.toDate?.()?.getTime?.() || 0;
     return t(b) - t(a);   // newest first
   });
-  likers.badge.textContent = docs.length.toLocaleString();
+  likers.badge.textContent = all.length.toLocaleString();
+
+  // Tabs: All · 👍 n · ❤️ n · 😂 n · 😮 n (only the ones used)
+  const tally = new Map();
+  for (const d of all) { const t = reactionOf(d.data()); tally.set(t, (tally.get(t) || 0) + 1); }
+  if (likers.filter !== "all" && !tally.has(likers.filter)) likers.filter = "all";
+  const tab = (key, label, n) => {
+    const b = el("button", "react-tab");
+    b.type = "button";
+    b.setAttribute("role", "tab");
+    b.setAttribute("aria-selected", String(likers.filter === key));
+    if (POST_REACTIONS[key]) b.append(reactEmoji(key, "react-emoji react-tab-emoji"));
+    else b.append(el("span", "", label));
+    b.append(el("span", "react-tab-n", n.toLocaleString()));
+    b.setAttribute("aria-label", `${POST_REACTIONS[key] ? POST_REACTIONS[key].label : "All"}: ${n}`);
+    b.addEventListener("click", () => { likers.filter = key; fillLikers(postId); });
+    return b;
+  };
+  likers.tabs.replaceChildren(
+    tab("all", "All", all.length),
+    ...Object.keys(POST_REACTIONS).filter((k) => tally.has(k)).map((k) => tab(k, POST_REACTIONS[k].emoji, tally.get(k)))
+  );
+  likers.tabs.hidden = tally.size < 2;
+
+  const docs = likers.filter === "all" ? all : all.filter((d) => reactionOf(d.data()) === likers.filter);
   if (!docs.length) {
-    likers.list.replaceChildren(el("li", "comment-empty", "No likes yet."));
+    likers.list.replaceChildren(el("li", "comment-empty", "No reactions yet."));
     return;
   }
   likers.list.replaceChildren(...docs.map((d) => {
@@ -2695,8 +2554,10 @@ const fillLikers = (postId) => {
       : commentIcon(DEVICE_ICONS[deviceKind(info.name)], "icon liker-logo"));
     const kind = el("span", "liker-kind");
     kind.append(commentIcon(DEVICE_ICONS[deviceKind(info.name)]));
-    const heart = el("span", "liker-heart");
-    heart.append(commentIcon(`<path d="${HEART_PATH}"/>`, "icon icon-fill"));
+    // Their reaction in the corner
+    const heart = el("span", "liker-heart is-emoji");
+    heart.append(reactEmoji(reactionOf(v)));
+    heart.title = POST_REACTIONS[reactionOf(v)].label;
     icon.append(kind, heart);
 
     const text = el("span", "liker-text");
@@ -2716,7 +2577,7 @@ const fillLikers = (postId) => {
 
 const openLikers = (postId) => {
   fillLikers(postId);
-  postDialog.show({ key: `likes:${postId}`, label: "Liked by", content: likers.wrap });
+  postDialog.show({ key: `likes:${postId}`, label: "Reactions", content: likers.wrap });
 };
 
 document.addEventListener("click", (e) => {
@@ -2748,43 +2609,138 @@ onAuthStateChanged(likeAuth, (u) => {
   for (const id of likeState.keys()) renderLikes(id);
 });
 
+// Save, change or remove your reaction (one per person per post)
 const likeBusy = new Set();
-document.addEventListener("click", async (e) => {
-  const btn = e.target.closest("[data-like-btn]");
-  if (!btn) return;
-  const postId = btn.dataset.likeBtn;
+const setReaction = async (postId, type, from) => {
   if (likeBusy.has(postId)) return;
   likeBusy.add(postId);
-
-  const wasLiked = btn.getAttribute("aria-pressed") === "true";
-  // Show it straight away; the live listener confirms it
-  btn.setAttribute("aria-pressed", String(!wasLiked));
-  if (!wasLiked) {
-    const r = btn.getBoundingClientRect();
+  const st = likeState.get(postId);
+  const current = st && likeUid ? st.docs.find((d) => d.data().uid === likeUid) : null;
+  const removing = !type || (current && reactionOf(current.data()) === type);
+  if (!removing && from) {
+    const r = from.getBoundingClientRect();
     window.dispatchEvent(new CustomEvent("hearts:burst", {
       detail: { x: r.left + r.width / 2, y: r.top + r.height / 2, count: 10, speed: 3 },
     }));
   }
-
   try {
     const u = likeAuth.currentUser || (await signInAnonymously(likeAuth)).user;
     likeUid = u.uid;
     const ref = doc(likesRef, likeId(postId, u.uid));
-    if (wasLiked) {
-      await deleteDoc(ref);
+    if (removing) {
+      await deleteDoc(ref);   // the live listener updates the button and the count
     } else {
       const device = await detectDevice();
-      await setDoc(ref, { post: postId, uid: u.uid, device: device.slice(0, 40), createdAt: serverTimestamp() });
+      await setDoc(ref, { post: postId, uid: u.uid, device: device.slice(0, 40), type, createdAt: serverTimestamp() });
     }
   } catch (err) {
     console.error(err);
-    btn.setAttribute("aria-pressed", String(wasLiked));
     renderLikes(postId);
-    window.showToast?.(explainComment(err, wasLiked ? "remove your like" : "save your like"));
+    window.showToast?.(explainComment(err, removing ? "remove your reaction" : "save your reaction"));
   } finally {
     likeBusy.delete(postId);
   }
+};
+
+// The reaction bar: hover the button (computer) or press and hold it (phone)
+const reactBar = el("div", "react-bar");
+reactBar.setAttribute("role", "toolbar");
+reactBar.setAttribute("aria-label", "Reactions");
+reactBar.hidden = true;
+let reactFor = null;   // { postId, btn }
+let reactHoverTimer = 0;
+let reactLeaveTimer = 0;
+for (const [type, r] of Object.entries(POST_REACTIONS)) {
+  const b = el("button", "react-pick");
+  b.append(reactEmoji(type));
+  b.type = "button";
+  b.dataset.type = type;
+  b.dataset.tip = r.label;
+  b.setAttribute("aria-label", r.label);
+  reactBar.append(b);
+}
+document.body.append(reactBar);
+
+const placeReactBar = () => {
+  if (!reactFor) return;
+  const r = reactFor.btn.getBoundingClientRect();
+  const w = reactBar.offsetWidth;
+  const left = Math.min(Math.max(8, r.left + r.width / 2 - w / 2), window.innerWidth - w - 8);
+  reactBar.style.left = `${Math.round(left)}px`;
+  reactBar.style.top = `${Math.round(Math.max(8, r.top - reactBar.offsetHeight - 8))}px`;
+};
+const openReactBar = (btn) => {
+  clearTimeout(reactLeaveTimer);
+  reactFor = { postId: btn.dataset.likeBtn, btn };
+  const st = likeState.get(reactFor.postId);
+  const mineDoc = st && likeUid ? st.docs.find((d) => d.data().uid === likeUid) : null;
+  const myType = mineDoc ? reactionOf(mineDoc.data()) : null;
+  for (const b of reactBar.querySelectorAll(".react-pick")) b.classList.toggle("is-selected", b.dataset.type === myType);
+  reactBar.hidden = false;
+  placeReactBar();
+  requestAnimationFrame(() => reactBar.classList.add("is-open"));
+};
+const closeReactBar = () => {
+  clearTimeout(reactHoverTimer);
+  reactBar.classList.remove("is-open");
+  reactBar.hidden = true;
+  reactFor = null;
+};
+
+reactBar.addEventListener("click", (e) => {
+  const b = e.target.closest(".react-pick");
+  if (!b || !reactFor) return;
+  const { postId, btn } = reactFor;
+  closeReactBar();
+  setReaction(postId, b.dataset.type, btn);
 });
+reactBar.addEventListener("pointerenter", () => clearTimeout(reactLeaveTimer));
+reactBar.addEventListener("pointerleave", (e) => {
+  if (e.pointerType === "mouse") reactLeaveTimer = setTimeout(closeReactBar, 300);
+});
+
+// Computer: hovering the Like button opens the bar after a moment
+document.addEventListener("pointerover", (e) => {
+  if (e.pointerType !== "mouse") return;
+  const btn = e.target.closest("[data-like-btn]");
+  if (!btn || (reactFor && reactFor.btn === btn)) return;
+  clearTimeout(reactHoverTimer);
+  reactHoverTimer = setTimeout(() => openReactBar(btn), 450);
+});
+document.addEventListener("pointerout", (e) => {
+  if (e.pointerType !== "mouse") return;
+  const btn = e.target.closest("[data-like-btn]");
+  if (!btn || btn.contains(e.relatedTarget)) return;
+  clearTimeout(reactHoverTimer);
+  if (reactFor) reactLeaveTimer = setTimeout(closeReactBar, 300);
+});
+
+// Phone: press and hold the Like button
+let holdTimer = 0;
+let held = false;
+document.addEventListener("pointerdown", (e) => {
+  if (!reactBar.hidden && !reactBar.contains(e.target) && !e.target.closest("[data-like-btn]")) closeReactBar();
+  const btn = e.target.closest("[data-like-btn]");
+  if (!btn || e.pointerType === "mouse") return;
+  held = false;
+  holdTimer = setTimeout(() => { held = true; if (navigator.vibrate) navigator.vibrate(12); openReactBar(btn); }, 450);
+});
+for (const type of ["pointerup", "pointercancel"]) document.addEventListener(type, () => clearTimeout(holdTimer));
+document.addEventListener("contextmenu", (e) => { if (e.target.closest("[data-like-btn]")) e.preventDefault(); });
+
+// A quick click: 👍 Like, or remove your reaction
+document.addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-like-btn]");
+  if (!btn) return;
+  if (held) { held = false; e.preventDefault(); return; }   // the hold opened the bar instead
+  closeReactBar();
+  const postId = btn.dataset.likeBtn;
+  const st = likeState.get(postId);
+  const mineDoc = st && likeUid ? st.docs.find((d) => d.data().uid === likeUid) : null;
+  setReaction(postId, mineDoc ? null : "like", btn);
+});
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !reactBar.hidden) closeReactBar(); });
+window.addEventListener("scroll", () => { if (!reactBar.hidden) placeReactBar(); }, { passive: true });
 
 watchLikes("pinned");
 
@@ -3054,8 +3010,7 @@ const renderPost = (d, kind = "admin") => {
   like.type = "button";
   like.dataset.likeBtn = d.id;
   like.setAttribute("aria-pressed", "false");
-  like.innerHTML = `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="${HEART_PATH}"/></svg>`;   // fixed markup
-  like.append(" Like");
+  like.innerHTML = `<span class="react-ico">${THUMB_ICON}</span><span class="react-label">Like</span>`;   // fixed markup
   const comment = el("button", "post-action");
   comment.type = "button";
   comment.dataset.commentBtn = d.id;

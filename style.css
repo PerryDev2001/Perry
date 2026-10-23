@@ -4134,3 +4134,264 @@ html.theme-switching .switch-knob {
 
 .rx-act:hover, .rx-act:focus-visible { outline: none; background: var(--hover); }
 .rx-act .icon { width: 16px; height: 16px; }
+
+/* ==========================================================================
+   Post reactions: 👍 Like · ❤️ Heart · 😂 Haha · 😮 Wow
+   ========================================================================== */
+.post-action .react-ico { display: inline-grid; place-items: center; font-size: 18px; line-height: 1; }
+.post-action .react-ico .icon { width: 18px; height: 18px; }
+
+/* Your reaction colours the button (instead of the green fill) */
+.post-action[data-like-btn][aria-pressed="true"] { background: var(--btn); }
+.post-action[data-like-btn][aria-pressed="true"] .icon { animation: none; }
+.post-action[data-like-btn].is-like { color: #2563eb; }
+.post-action[data-like-btn].is-heart { color: #e11d48; }
+.post-action[data-like-btn].is-haha,
+.post-action[data-like-btn].is-wow { color: #d97706; }
+:root[data-theme="dark"] .post-action[data-like-btn].is-like { color: #60a5fa; }
+:root[data-theme="dark"] .post-action[data-like-btn].is-heart { color: #fb7185; }
+:root[data-theme="dark"] .post-action[data-like-btn].is-haha,
+:root[data-theme="dark"] .post-action[data-like-btn].is-wow { color: #fbbf24; }
+.post-action[data-like-btn][aria-pressed="true"] .react-ico { animation: reactPop 0.35s var(--ease); }
+@keyframes reactPop { 0% { transform: scale(0.6); } 70% { transform: scale(1.2); } 100% { transform: scale(1); } }
+
+/* Hover / hold bar */
+.react-bar {
+  position: fixed;
+  z-index: 9998;
+  display: flex;
+  gap: 2px;
+  padding: 5px 6px;
+  background: var(--card-solid);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  box-shadow: var(--shadow-pop);
+  opacity: 0;
+  transform: translateY(6px) scale(0.96);
+  transition: opacity 0.15s ease, transform 0.25s var(--ease);
+}
+
+.react-bar[hidden] { display: none; }
+.react-bar.is-open { opacity: 1; transform: none; }
+
+.react-pick {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  font-size: 27px;
+  line-height: 1;
+  background: transparent;
+  border: 0;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: transform 0.18s var(--ease), background-color 0.15s ease;
+}
+
+.react-pick:hover,
+.react-pick:focus-visible { outline: none; transform: translateY(-6px) scale(1.28); }
+.react-pick.is-selected { background: var(--accent-soft); box-shadow: inset 0 0 0 1.5px var(--accent-2); }
+
+.react-pick[data-tip]::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 50%;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+  color: var(--bg);
+  background: var(--fg);
+  border-radius: 999px;
+  opacity: 0;
+  transform: translateX(-50%) scale(0.8);
+  transition: opacity 0.12s ease, transform 0.12s ease;
+  pointer-events: none;
+}
+
+.react-pick:hover[data-tip]::after,
+.react-pick:focus-visible[data-tip]::after { opacity: 1; transform: translateX(-50%) scale(calc(1 / 1.28)); }
+
+/* Summary under the post: overlapping emojis + count */
+.react-stack { display: inline-flex; margin-right: 8px; }
+
+.react-stack-emoji {
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  margin-left: -5px;
+  font-size: 13px;
+  line-height: 1;
+  background: var(--card-solid);
+  border: 2px solid var(--card-solid);
+  border-radius: 50%;
+  box-shadow: 0 1px 2px rgba(2, 44, 34, 0.15);
+}
+
+.react-stack-emoji:first-child { margin-left: 0; }
+
+/* Reactions dialog: filter tabs + emoji badge */
+.react-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: -4px 0 10px;
+}
+
+.react-tabs[hidden] { display: none; }
+
+.react-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--muted);
+  background: var(--inset);
+  border: 1px solid transparent;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.react-tab[aria-selected="true"] { color: var(--accent-text); background: var(--accent-soft); border-color: var(--accent-2); }
+.react-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.react-tab-n { font-size: 12px; }
+
+.liker-heart.is-emoji {
+  width: 21px;
+  height: 21px;
+  font-size: 12px;
+  line-height: 1;
+  background: var(--card-solid);
+}
+
+/* ==========================================================================
+   Emoji: the device's own emoji everywhere (picker, messages, reactions)
+   ========================================================================== */
+:root { --emoji-font: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", "Twemoji Mozilla", "Segoe UI Symbol", sans-serif; }
+
+.emoji,
+.emoji-tab,
+.emoji-native,
+.react-emoji,
+.react-pick,
+.react-stack-emoji,
+.liker-heart.is-emoji,
+.rx-pick,
+.msg.is-jumbo .msg-text { font-family: var(--emoji-font); }
+
+/* Post reactions: compact native emoji */
+.post-action .react-ico { font-size: 18px; line-height: 1; }
+.react-emoji { display: inline-block; line-height: 1; }
+.react-pick { width: 40px; height: 40px; font-size: 26px; }
+.react-pick:hover,
+.react-pick:focus-visible { transform: translateY(-4px) scale(1.2); }
+.react-pick:hover[data-tip]::after,
+.react-pick:focus-visible[data-tip]::after { transform: translateX(-50%) scale(calc(1 / 1.2)); }
+.react-stack-emoji { font-size: 13px; }
+.react-tab-emoji { font-size: 15px; }
+.liker-heart.is-emoji { font-size: 11px; }
+.rx-pick { font-size: 22px; }
+.rx-chip .rx-emoji { font-size: 13px; }
+.rx-who .rx-emoji { font-size: 16px; }
+
+/* ---------- Emoji picker: search · categories · grid · skin tone ---------- */
+.emoji-picker { height: 340px; }
+.emoji-picker.comment-emoji-picker { height: 280px; }
+.inline-emoji-picker.composer-emoji-picker,
+.emoji-picker.composer-emoji-picker { height: 280px; }
+
+.emoji-search {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 8px 2px;
+  padding: 0 12px;
+  height: 36px;
+  color: var(--muted);
+  background: var(--inset);
+  border: 1px solid transparent;
+  border-radius: 999px;
+}
+
+.emoji-search:focus-within { border-color: var(--accent-2); box-shadow: 0 0 0 3px var(--accent-soft); }
+.emoji-search .icon { width: 15px; height: 15px; flex: none; }
+
+.emoji-search input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  font: inherit;
+  font-size: 13.5px;
+  color: var(--fg);
+  background: transparent;
+  border: 0;
+  outline: none;
+}
+
+.emoji-search input::-webkit-search-cancel-button { cursor: pointer; }
+
+.emoji-tabs { border-bottom: 1px solid var(--divider); }
+.emoji-tab { font-size: 17px; filter: grayscale(0.6); }
+
+.emoji-section-title {
+  flex: none;
+  margin: 8px 12px 2px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.emoji-section-title:empty { display: none; }
+
+.emoji-grid { grid-template-columns: repeat(auto-fill, minmax(38px, 1fr)); padding: 4px 8px 8px; }
+.emoji { font-size: 24px; }
+.emoji:hover { transform: scale(1.12); }
+
+.emoji-foot {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  border-top: 1px solid var(--divider);
+}
+
+.emoji-foot-label { font-size: 11.5px; font-weight: 600; color: var(--muted); }
+.emoji-tones { display: flex; gap: 6px; }
+
+.emoji-tone {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  background: var(--tone);
+  border: 2px solid var(--card-solid);
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px var(--border);
+  cursor: pointer;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.emoji-tone:hover { transform: scale(1.12); }
+.emoji-tone[aria-checked="true"] { box-shadow: 0 0 0 2px var(--accent-2); }
+.emoji-tone:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+@media (max-width: 600px) {
+  .emoji-picker { height: 300px; }
+  .emoji-search input { font-size: 16px; }   /* no zoom on iPhone */
+}
+/* The chat window is small: keep part of the conversation visible */
+#emojiPicker.emoji-picker { height: 300px; }
+@media (max-width: 600px) { #emojiPicker.emoji-picker { height: 270px; } }
