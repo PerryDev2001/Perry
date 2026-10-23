@@ -995,8 +995,6 @@ const commentIcon = (paths, cls = "icon") => {
   return svgEl;
 };
 
-const QUICK_EMOJI = ["😂", "❤️", "🔥", "👏", "🙏", "😍", "💚"];
-
 // Builds the comment section markup for one post
 const buildCommentSection = (postId) => {
   const section = el("section", "comments");
@@ -1045,18 +1043,22 @@ const buildCommentSection = (postId) => {
   send.disabled = true;
   send.setAttribute("aria-label", "Post comment");
   send.append(commentIcon('<path d="M3.4 20.4 21 12 3.4 3.6 3.4 10l12.6 2-12.6 2Z"/>', "icon icon-fill"));
-  compose.append(text, chars, send);
-  const quick = el("div", "comment-quick");
-  quick.setAttribute("role", "group");
-  quick.setAttribute("aria-label", "Quick emoji");
-  for (const e of QUICK_EMOJI) {
-    const b = el("button", "", e);
-    b.type = "button";
-    b.dataset.emoji = e;
-    b.setAttribute("aria-label", `Add ${e}`);
-    quick.append(b);
-  }
-  box.append(nameRow, compose, quick);
+  // Emoji picker, the same as the chat's
+  const emojiToggle = el("button", "chat-emoji-btn comment-emoji-btn");
+  emojiToggle.type = "button";
+  emojiToggle.setAttribute("aria-label", "Add emoji");
+  emojiToggle.setAttribute("aria-expanded", "false");
+  emojiToggle.append(commentIcon('<path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm-3.5 7a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3Zm7 0a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3ZM12 18a5.5 5.5 0 0 1-5-3.2h10A5.5 5.5 0 0 1 12 18Z"/>', "icon icon-fill"));
+  compose.append(text, emojiToggle, chars, send);
+  const emojiPicker = el("div", "emoji-picker comment-emoji-picker");
+  emojiPicker.setAttribute("role", "dialog");
+  emojiPicker.setAttribute("aria-label", "Choose an emoji");
+  emojiPicker.hidden = true;
+  const emojiTabs = el("div", "emoji-tabs");
+  emojiTabs.setAttribute("role", "tablist");
+  const emojiGrid = el("div", "emoji-grid");
+  emojiPicker.append(emojiTabs, emojiGrid);
+  box.append(nameRow, emojiPicker, compose);
   form.append(me, box);
 
   const status = el("p", "comment-status");
@@ -1064,7 +1066,7 @@ const buildCommentSection = (postId) => {
   status.hidden = true;
 
   section.append(head, more, list, form, status);
-  return { section, badge, more, list, form, me, nameInput: nameInput2, text, chars, send, status };
+  return { section, badge, more, list, form, me, nameInput: nameInput2, text, chars, send, status, emojiToggle, emojiPicker, emojiTabs, emojiGrid };
 };
 
 /* ---------- Post dialog: comments and "liked by" open in a pop-up ---------- */
@@ -1360,19 +1362,79 @@ const createThread = (postId) => {
     if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); ui.form.requestSubmit(); }
   });
 
-  ui.form.querySelector(".comment-quick").addEventListener("click", (e) => {
-    const b = e.target.closest("[data-emoji]");
+  // Emoji picker (same categories and "Recent" list as the chat)
+  let cat = EMOJI[0].list.length ? 0 : 1;
+  const drawTabs = () => {
+    ui.emojiTabs.replaceChildren(...EMOJI.map((c, i) => {
+      const t = el("button", "emoji-tab", c.icon);
+      t.type = "button";
+      t.setAttribute("role", "tab");
+      t.setAttribute("aria-label", c.label);
+      t.setAttribute("aria-selected", String(i === cat));
+      t.dataset.cat = i;
+      return t;
+    }));
+  };
+  const drawGrid = () => {
+    const c = EMOJI[cat];
+    ui.emojiGrid.setAttribute("aria-label", c.label);
+    if (!c.list.length) {
+      ui.emojiGrid.replaceChildren(el("p", "emoji-empty", "Emoji you use will show up here."));
+      return;
+    }
+    ui.emojiGrid.replaceChildren(...c.list.map((emoji) => {
+      const b = el("button", "emoji", emoji);
+      b.type = "button";
+      b.setAttribute("aria-label", emoji);
+      return b;
+    }));
+  };
+  const emojiOpen = () => !ui.emojiPicker.hidden;
+  const openEmoji = () => {
+    if (EMOJI[0].list.length && !ui.emojiPicker.dataset.seen) cat = 0;
+    ui.emojiPicker.dataset.seen = "1";
+    drawTabs();
+    drawGrid();
+    ui.emojiPicker.hidden = false;
+    void ui.emojiPicker.offsetWidth;
+    ui.emojiPicker.classList.add("is-open");
+    ui.emojiToggle.setAttribute("aria-expanded", "true");
+    ui.emojiToggle.classList.add("is-active");
+  };
+  const closeEmoji = () => {
+    ui.emojiPicker.classList.remove("is-open");
+    ui.emojiPicker.hidden = true;
+    ui.emojiToggle.setAttribute("aria-expanded", "false");
+    ui.emojiToggle.classList.remove("is-active");
+  };
+  ui.emojiToggle.addEventListener("click", () => {
+    if (emojiOpen()) closeEmoji(); else openEmoji();
+    if (matchMedia("(hover: hover)").matches) ui.text.focus();
+  });
+  ui.emojiTabs.addEventListener("click", (e) => {
+    const t = e.target.closest(".emoji-tab");
+    if (!t) return;
+    cat = +t.dataset.cat;
+    drawTabs();
+    drawGrid();
+    ui.emojiGrid.scrollTop = 0;
+  });
+  ui.emojiGrid.addEventListener("click", (e) => {
+    const b = e.target.closest(".emoji");
     if (!b) return;
-    const emoji = b.dataset.emoji;
+    const emoji = b.textContent;
     const start = ui.text.selectionStart ?? ui.text.value.length;
     const end = ui.text.selectionEnd ?? ui.text.value.length;
     const next = ui.text.value.slice(0, start) + emoji + ui.text.value.slice(end);
     if (next.length > MAX_COMMENT) return;
     ui.text.value = next;
     ui.text.setSelectionRange(start + emoji.length, start + emoji.length);
-    ui.text.focus();
     grow();
-    b.animate([{ transform: "scale(1.4)" }, { transform: "scale(1)" }], { duration: 250, easing: "ease-out" });
+    remember(emoji);
+    b.animate([{ transform: "scale(1.35)" }, { transform: "scale(1)" }], { duration: 250, easing: "ease-out" });
+  });
+  document.addEventListener("pointerdown", (e) => {
+    if (emojiOpen() && !ui.emojiPicker.contains(e.target) && !ui.emojiToggle.contains(e.target)) closeEmoji();
   });
 
   ui.form.addEventListener("submit", async (e) => {
@@ -1400,6 +1462,7 @@ const createThread = (postId) => {
         createdAt: serverTimestamp(),
       });
       lastComment = Date.now();
+      closeEmoji();
       ui.text.value = "";
       setStatus2("");
     } catch (err) {
@@ -1427,7 +1490,7 @@ const createThread = (postId) => {
         key: `comments:${postId}`,
         label: "Comments",
         content: ui.section,
-        onClose: () => { mark(false); editingId = null; confirmingId = null; setStatus2(""); },
+        onClose: () => { mark(false); closeEmoji(); editingId = null; confirmingId = null; setStatus2(""); },
       });
       mark(true);
       render();

@@ -2938,3 +2938,28 @@ html.has-post-dialog body { overflow: hidden; }
   .post-dialog,
   .post-dialog-panel { transition: none; }
 }
+
+/* Comment emoji picker (same look as the chat's) */
+.comment-box { position: relative; }
+
+.comment-emoji-picker {
+  position: relative;
+  left: auto;
+  right: auto;
+  bottom: auto;
+  height: 230px;
+  box-shadow: none;
+  transform-origin: bottom center;
+}
+
+.comment-emoji-btn {
+  align-self: center;
+  width: 34px;
+  height: 34px;
+}
+
+.comment-emoji-btn .icon { width: 20px; height: 20px; }
+
+@media (max-width: 600px) {
+  .comment-emoji-picker { height: 200px; }
+}
