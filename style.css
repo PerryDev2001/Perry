@@ -2844,49 +2844,6 @@ html.has-post-dialog body { overflow: hidden; }
 
 .liker:first-child { border-top: 0; }
 
-.liker-icon {
-  position: relative;
-  flex: none;
-  width: 38px;
-  height: 38px;
-  display: grid;
-  place-items: center;
-  color: var(--accent-text);
-  background: var(--accent-soft);
-  border-radius: 50%;
-}
-
-.liker-icon > .icon { width: 18px; height: 18px; }
-
-.liker-heart {
-  position: absolute;
-  right: -2px;
-  bottom: -2px;
-  width: 17px;
-  height: 17px;
-  display: grid;
-  place-items: center;
-  color: var(--on-accent);
-  background: var(--grad);
-  border: 2px solid var(--card-solid);
-  border-radius: 50%;
-}
-
-.liker-heart .icon { width: 8px; height: 8px; }
-
-.liker-name {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 14px;
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .liker-time { flex: none; font-size: 12px; color: var(--muted); }
 
 /* Like count is a button that opens the list */
@@ -2963,3 +2920,101 @@ html.has-post-dialog body { overflow: hidden; }
 @media (max-width: 600px) {
   .comment-emoji-picker { height: 200px; }
 }
+
+/* "Liked by": brand logo tile + device name + brand line */
+.liker-icon {
+  --tile: var(--accent-soft);
+  --tile-fg: var(--accent-text);
+  position: relative;
+  flex: none;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  color: var(--tile-fg);
+  background: var(--tile);
+  border-radius: 14px;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12), 0 6px 14px -8px rgba(2, 44, 34, 0.45);
+}
+
+.liker-logo { width: 22px; height: 22px; }
+
+.liker-icon.tone-apple   { --tile: linear-gradient(145deg, #3a3a3c, #0b0b0c); --tile-fg: #fff; }
+.liker-icon.tone-windows { --tile: linear-gradient(145deg, #3aa0ff, #0063b1); --tile-fg: #fff; }
+.liker-icon.tone-android { --tile: linear-gradient(145deg, #6ee7a1, #1fa463); --tile-fg: #062b17; }
+.liker-icon.tone-samsung { --tile: linear-gradient(145deg, #3d5afe, #1428a0); --tile-fg: #fff; }
+.liker-icon.tone-google  { --tile: linear-gradient(145deg, #8ab4f8, #1a73e8); --tile-fg: #fff; }
+.liker-icon.tone-xiaomi  { --tile: linear-gradient(145deg, #ff9a4d, #ff6900); --tile-fg: #fff; }
+.liker-icon.tone-oppo    { --tile: linear-gradient(145deg, #4bd18c, #008a45); --tile-fg: #fff; }
+.liker-icon.tone-vivo    { --tile: linear-gradient(145deg, #6c8cff, #415fff); --tile-fg: #fff; }
+.liker-icon.tone-realme  { --tile: linear-gradient(145deg, #ffe066, #f5c400); --tile-fg: #1a1a1a; }
+.liker-icon.tone-huawei  { --tile: linear-gradient(145deg, #ff5a5f, #cf0a2c); --tile-fg: #fff; }
+:root[data-theme="dark"] .liker-icon.tone-apple { --tile: linear-gradient(145deg, #ffffff, #d4d4d8); --tile-fg: #0b0b0c; }
+
+/* Small device-type chip (phone / tablet / computer) at the top-left */
+.liker-kind {
+  position: absolute;
+  left: -4px;
+  top: -4px;
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  background: var(--card-solid);
+  border: 1px solid var(--border);
+  border-radius: 50%;
+}
+
+.liker-kind .icon { width: 10px; height: 10px; }
+
+.liker-heart {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  width: 19px;
+  height: 19px;
+  display: grid;
+  place-items: center;
+  color: var(--on-accent);
+  background: var(--grad);
+  border: 2px solid var(--card-solid);
+  border-radius: 50%;
+}
+
+.liker-heart .icon { width: 9px; height: 9px; }
+
+.liker-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.liker-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.liker-device {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.liker-sub {
+  font-size: 12px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.liker-sub strong { color: var(--fg); font-weight: 600; }
+.liker { gap: 14px; padding: 12px 2px; }
+

@@ -1602,6 +1602,32 @@ const likers = (() => {
   return { wrap, badge, list };
 })();
 
+// Device name -> brand, type and logo (for the "Liked by" list)
+const BRAND_LOGOS = {
+  apple: '<path d="M16.4 12.7c0-2.5 2-3.7 2.1-3.8-1.2-1.7-3-1.9-3.6-2-1.5-.2-3 .9-3.8.9-.8 0-2-.9-3.3-.9-1.7 0-3.3 1-4.1 2.5-1.8 3.1-.5 7.6 1.3 10.1.8 1.2 1.8 2.6 3.1 2.5 1.2-.1 1.7-.8 3.2-.8s1.9.8 3.2.8c1.3 0 2.2-1.2 3-2.4 1-1.4 1.4-2.7 1.4-2.8 0 0-2.5-1-2.5-4.1ZM14 5.3c.7-.8 1.1-1.9 1-3-1 0-2.1.6-2.8 1.4-.6.7-1.2 1.8-1 2.9 1 .1 2.1-.5 2.8-1.3Z"/>',
+  windows: '<path d="M3 5.6 10.4 4.6v7H3zM11.4 4.4 21 3v8.6h-9.6zM3 12.4h7.4v7.1L3 18.4zM11.4 12.4H21V21l-9.6-1.4z"/>',
+  android: '<path d="M17.5 9.6 19.3 6.5a.6.6 0 0 0-1.1-.6l-1.8 3.2a11 11 0 0 0-8.8 0L5.8 5.9a.6.6 0 0 0-1.1.6l1.8 3.1A10.4 10.4 0 0 0 1.2 18h21.6a10.4 10.4 0 0 0-5.3-8.4ZM7.2 15.1a1.2 1.2 0 1 1 0-2.4 1.2 1.2 0 0 1 0 2.4Zm9.6 0a1.2 1.2 0 1 1 0-2.4 1.2 1.2 0 0 1 0 2.4Z"/>',
+  chrome: '<circle cx="12" cy="12" r="9.5" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="3.6"/><path d="M12 8.4h8.6M8.9 13.8 4.6 6.3M15.1 13.8l-4.3 7.5" fill="none" stroke="currentColor" stroke-width="2"/>',
+  linux: '<path d="M12 2.5c-2.2 0-3.6 1.8-3.6 4.4 0 1.5.3 2.3-.6 3.6-1.2 1.6-2.6 3.6-2.6 6 0 .6.1 1.1.3 1.6-.9.4-1.8 1-1.4 1.9.5 1 2.4.6 3.6 1.4.9.6 1.6.6 2.2.1.6-.4 1.4-.6 2.1-.6s1.5.2 2.1.6c.6.5 1.3.5 2.2-.1 1.2-.8 3.1-.4 3.6-1.4.4-.9-.5-1.5-1.4-1.9.2-.5.3-1 .3-1.6 0-2.4-1.4-4.4-2.6-6-.9-1.3-.6-2.1-.6-3.6 0-2.6-1.4-4.4-3.6-4.4Zm-1.5 4a.8.8 0 1 1 0 1.6.8.8 0 0 1 0-1.6Zm3 0a.8.8 0 1 1 0 1.6.8.8 0 0 1 0-1.6ZM12 9.2l1.6.9-1.6 1-1.6-1Z"/>',
+};
+
+const deviceInfo = (device = "") => {
+  const d = device.trim() || "Unknown device";
+  if (/^iPhone/i.test(d)) return { name: d, brand: "Apple", type: "Phone · iOS", logo: "apple", tone: "apple" };
+  if (/^iPad/i.test(d)) return { name: d, brand: "Apple", type: "Tablet · iPadOS", logo: "apple", tone: "apple" };
+  if (/^Mac/i.test(d)) return { name: d, brand: "Apple", type: "Computer · macOS", logo: "apple", tone: "apple" };
+  if (/Windows/i.test(d)) return { name: d, brand: "Microsoft", type: "Computer · Windows", logo: "windows", tone: "windows" };
+  if (/Chromebook/i.test(d)) return { name: d, brand: "Google", type: "Laptop · ChromeOS", logo: "chrome", tone: "google" };
+  if (/Linux/i.test(d)) return { name: d, brand: "Linux", type: "Computer", logo: "linux", tone: "plain" };
+  if (/^Unknown/i.test(d)) return { name: d, brand: "Unknown brand", type: "Device", logo: null, tone: "plain" };
+  if (/^Android/i.test(d)) return { name: d, brand: "Android", type: "Phone · Android", logo: "android", tone: "android" };
+  // Android phones are saved as "Brand Model" (e.g. "Samsung SM-A515F")
+  const known = BRANDS.map(([, b]) => b).find((b) => d.toLowerCase().startsWith(b.toLowerCase()));
+  const brand = known || d.split(/\s+/)[0];
+  const tone = { Samsung: "samsung", Google: "google", Xiaomi: "xiaomi", OPPO: "oppo", vivo: "vivo", realme: "realme", Huawei: "huawei" }[brand] || "android";
+  return { name: d, brand, type: "Phone · Android", logo: "android", tone };
+};
+
 const fillLikers = (postId) => {
   const st = likeState.get(postId);
   const docs = (st ? st.docs : []).slice().sort((a, b) => {
@@ -1615,19 +1641,33 @@ const fillLikers = (postId) => {
   }
   likers.list.replaceChildren(...docs.map((d) => {
     const v = d.data({ serverTimestamps: "estimate" });
-    const device = v.device || "Unknown device";
+    const info = deviceInfo(v.device);
     const date = v.createdAt?.toDate?.();
     const li = el("li", "liker");
-    const icon = el("span", "liker-icon");
-    icon.append(commentIcon(DEVICE_ICONS[deviceKind(device)]));
+
+    // Brand logo tile, with the device type in the corner and a heart badge
+    const icon = el("span", `liker-icon tone-${info.tone}`);
+    icon.title = `${info.brand} · ${info.type}`;
+    icon.append(info.logo
+      ? commentIcon(BRAND_LOGOS[info.logo], "icon icon-fill liker-logo")
+      : commentIcon(DEVICE_ICONS[deviceKind(info.name)], "icon liker-logo"));
+    const kind = el("span", "liker-kind");
+    kind.append(commentIcon(DEVICE_ICONS[deviceKind(info.name)]));
     const heart = el("span", "liker-heart");
     heart.append(commentIcon(`<path d="${HEART_PATH}"/>`, "icon icon-fill"));
-    icon.append(heart);
-    const name = el("span", "liker-name", device);
+    icon.append(kind, heart);
+
+    const text = el("span", "liker-text");
+    const name = el("span", "liker-name");
+    name.append(el("span", "liker-device", info.name));
     if (likeUid && v.uid === likeUid) name.append(el("span", "viewer-you", "You"));
+    const sub = el("span", "liker-sub");
+    sub.append(el("strong", "", info.brand), ` · ${info.type}`);
+    text.append(name, sub);
+
     const when = el("time", "liker-time", relTime(date));
     if (date) { when.dateTime = date.toISOString(); when.title = date.toLocaleString(); }
-    li.append(icon, name, when);
+    li.append(icon, text, when);
     return li;
   }));
 };
