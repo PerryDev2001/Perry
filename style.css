@@ -3875,3 +3875,82 @@ html.theme-switching .switch-knob {
 .dm-keep-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .dm-keep-btn:disabled { opacity: 0.6; cursor: progress; }
 .dm-keep-btn .g-logo { width: 16px; height: 16px; }
+
+/* Owner's private inbox in the chat */
+.dm-owner-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 12px 0;
+  padding: 6px 10px 6px 4px;
+  background: var(--inset);
+  border-radius: 14px;
+}
+
+.dm-owner-bar[hidden] { display: none; }
+
+.dm-owner-back {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  color: var(--fg);
+  background: transparent;
+  border: 0;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.dm-owner-back:hover { background: var(--hover); }
+.dm-owner-back:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.dm-owner-back .icon { width: 18px; height: 18px; }
+
+.dm-owner-avatar {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  font-size: 13px;
+  font-weight: 700;
+  color: #fff;
+  background: linear-gradient(135deg, hsl(var(--h, 160) 70% 55%), hsl(calc(var(--h, 160) + 30) 70% 42%));
+  border-radius: 50%;
+}
+
+.dm-owner-who { min-width: 0; display: flex; flex-direction: column; line-height: 1.25; }
+.dm-owner-who strong { overflow: hidden; font-size: 13.5px; white-space: nowrap; text-overflow: ellipsis; }
+.dm-owner-who small { overflow: hidden; font-size: 11.5px; color: var(--muted); white-space: nowrap; text-overflow: ellipsis; }
+
+.dm-inbox-item { list-style: none; }
+
+.dm-inbox-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 8px;
+  font: inherit;
+  text-align: left;
+  color: var(--fg);
+  background: transparent;
+  border: 0;
+  border-radius: 14px;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.dm-inbox-btn:hover { background: var(--hover); }
+.dm-inbox-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.dm-inbox-avatar { width: 38px; height: 38px; font-size: 15px; }
+
+.dm-inbox-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.dm-inbox-top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.dm-inbox-top strong { overflow: hidden; font-size: 14px; white-space: nowrap; text-overflow: ellipsis; }
+.dm-inbox-time { flex: none; font-size: 11px; color: var(--muted); }
+.dm-inbox-last { overflow: hidden; font-size: 12.5px; color: var(--muted); white-space: nowrap; text-overflow: ellipsis; }
+.dm-inbox-btn.is-unread .dm-inbox-last { font-weight: 700; color: var(--fg); }
+.dm-inbox-dot { flex: none; width: 9px; height: 9px; background: var(--accent-2); border-radius: 50%; }

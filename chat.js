@@ -740,13 +740,18 @@ form.addEventListener("submit", (e) => {
   const name = nameInput.value.trim().slice(0, MAX_NAME);
   store.set("chat-name", name);
 
-  const priv = chatMode === "private" && !chatAdminUid;
-  const box = priv ? dmOutbox : chatOutbox;
+  const priv = chatMode === "private";
+  const asOwner = priv && ownerInbox.active;
+  if (asOwner && !ownerInbox.openId) {
+    setStatus("Pick a conversation to reply to.");
+    return;
+  }
+  const box = asOwner ? ownerOutbox : priv ? dmOutbox : chatOutbox;
   if (!box) {
     setStatus("Couldn't load the chat. Please refresh the page.");
     return;
   }
-  const res = box.send(textInput.value, { name });
+  const res = box.send(textInput.value, asOwner ? { thread: ownerInbox.openId } : { name });
   if (!res.ok) {
     const why = window.outboxRefusal(res);
     if (why) setStatus(why);
@@ -801,8 +806,8 @@ onAuthStateChanged(getAuth(app), async (u) => {
   drawCommunity();
   // Signed in as the admin: private chats are answered from the dashboard
   const modes = document.getElementById("chatModes");
-  if (modes) modes.hidden = Boolean(chatAdminUid);
-  if (chatAdminUid && chatMode === "private") setMode("public");
+  if (modes) modes.hidden = false;
+  if (chatMode === "private") setMode("private");   // refresh texts for owner / visitor
 });
 
 /* ---------- Open / close ---------- */
@@ -904,6 +909,8 @@ const firstName = () => profileNameNow().split(/\s+/)[0] || "the owner";
 
 const renderDm = () => {
   for (const n of document.querySelectorAll("[data-first-name]")) n.textContent = firstName();
+  if (ownerInbox.active) { renderOwnerInbox(); return; }
+  setOwnerChrome(false);
   const all = withOutbox(dmDocs, dmOutbox, (m) => ({
     from: "visitor",
     text: m.text,
@@ -936,6 +943,11 @@ const renderDm = () => {
 };
 
 const markDmSeen = () => {
+  if (ownerInbox.active) {
+    if (ownerInbox.openId) markOwnerRead(ownerInbox.openId);
+    syncOwnerUnread();
+    return;
+  }
   const latest = dmDocs.reduce((t, d) => Math.max(t, dmTime(d)), 0);
   if (latest > store.get("dm-seen", 0)) store.set("dm-seen", latest);
   dmUnread = 0;
@@ -1031,8 +1043,9 @@ onAuthStateChanged(dmAuth, async (u) => {
   if (u && !u.isAnonymous) {
     let owner = false;
     try { owner = (await getDoc(doc(db, "admins", u.uid))).exists(); } catch { owner = false; }
-    if (owner) { watchDm(null); renderKeep(); return; }
+    if (owner) { watchDm(null); startOwnerInbox(); renderKeep(); return; }
   }
+  stopOwnerInbox();
   watchDm(u ? u.uid : null);
   renderKeep();
 });
@@ -1048,10 +1061,15 @@ const setMode = (mode) => {
   list.hidden = priv;
   dmList.hidden = !priv;
   dmNote.hidden = !priv;
+  setOwnerChrome(ownerInbox.active);
   renderKeep();
   panel.classList.toggle("is-private", priv);
-  if (chatSub) chatSub.textContent = priv ? `Private · only you and ${firstName()}` : "Community Chat · Active now";
-  textInput.placeholder = priv ? `Message ${firstName()} privately…` : "Aa";
+  if (chatSub) {
+    chatSub.textContent = !priv ? "Community Chat · Active now"
+      : ownerInbox.active ? "Private messages from visitors"
+      : `Private · only you and ${firstName()}`;
+  }
+  textInput.placeholder = !priv ? "Aa" : ownerInbox.active ? ownerPlaceholder() : `Message ${firstName()} privately…`;
   textInput.maxLength = priv ? MAX_DM : MAX_TEXT;
   setStatus("");
   store.set("chat-mode", chatMode);
@@ -1114,6 +1132,229 @@ dmOutbox = window.createOutbox ? window.createOutbox({
     }
   },
 }) : null;
+
+/* ---------- Owner on the public page: private messages inbox ---------- */
+// Signed in as the owner, the Private tab lists every visitor's conversation; open one to
+// read and reply (the same conversations as the dashboard's Private messages).
+const ownerInbox = { active: false, threads: [], openId: null, msgs: [], unsubThreads: null, unsubMsgs: null, primed: false, lastAt: new Map() };
+const ownerBar = document.getElementById("dmOwnerBar");
+const ownerMs = (t) => (t && t.toMillis && t.toMillis()) || (t && t.toDate && t.toDate().getTime()) || 0;
+const ownerUnread = (v) => v.lastFrom === "visitor" && ownerMs(v.updatedAt) > ownerMs(v.adminReadAt);
+const ownerThread = (id) => ownerInbox.threads.find((d) => d.id === id) || null;
+
+function ownerPlaceholder() {
+  const t = ownerInbox.openId && ownerThread(ownerInbox.openId);
+  return t ? `Reply to ${t.data().name || "Anonymous"} privately…` : "Pick a conversation to reply…";
+}
+
+// Note + header texts for the owner (or back to the visitor's)
+function setOwnerChrome(on) {
+  const note = document.getElementById("dmNoteText");
+  if (note) {
+    if (on) note.textContent = "Private messages from visitors. Only you and each visitor can see them.";
+    else if (!note.querySelector("[data-first-name]")) {
+      const strong = el("strong", "", firstName());
+      strong.dataset.firstName = "";
+      note.replaceChildren("Private: only you and ", strong, " can see these messages.");
+    }
+  }
+  if (ownerBar) ownerBar.hidden = !(on && chatMode === "private" && ownerInbox.openId);
+}
+
+function syncOwnerUnread() {
+  const n = ownerInbox.threads.filter((d) => ownerUnread(d.data())).length;
+  dmUnread = n;
+  dmDot.hidden = !n;
+  setBadge();
+}
+
+function markOwnerRead(id) {
+  const t = ownerThread(id);
+  if (!t || !ownerUnread(t.data())) return;
+  if (!(isOpen() && chatMode === "private" && document.visibilityState === "visible")) return;
+  updateDoc(doc(db, "dms", id), { adminReadAt: serverTimestamp() }).catch((err) => console.warn(err));
+}
+
+function renderOwnerInbox() {
+  setOwnerChrome(true);
+  if (!ownerInbox.openId) {
+    if (!ownerInbox.threads.length) {
+      const empty = el("li", "chat-empty dm-empty");
+      empty.append(el("strong", "", "No private messages yet"), el("span", "", "Visitors can message you from the Private tab."));
+      dmList.replaceChildren(empty);
+      return;
+    }
+    dmList.replaceChildren(...ownerInbox.threads.map((d) => {
+      const v = d.data({ serverTimestamps: "estimate" });
+      const name = v.name || "Anonymous";
+      const li = el("li", "dm-inbox-item");
+      const b = el("button", "dm-inbox-btn");
+      b.type = "button";
+      if (ownerUnread(v)) b.classList.add("is-unread");
+      const av = el("span", "dm-owner-avatar dm-inbox-avatar", [...name][0].toUpperCase());
+      av.style.setProperty("--h", hueFor(name));
+      av.setAttribute("aria-hidden", "true");
+      const main = el("span", "dm-inbox-main");
+      const top = el("span", "dm-inbox-top");
+      top.append(el("strong", "", name), el("span", "dm-inbox-time", relTime(v.updatedAt && v.updatedAt.toDate && v.updatedAt.toDate())));
+      main.append(top, el("span", "dm-inbox-last", `${v.lastFrom === "admin" ? "You: " : ""}${v.lastText || ""}`));
+      b.append(av, main);
+      if (ownerUnread(v)) b.append(el("span", "dm-inbox-dot"));
+      b.addEventListener("click", () => openOwnerThread(d.id));
+      li.append(b);
+      return li;
+    }));
+    return;
+  }
+
+  // One conversation
+  const t = ownerThread(ownerInbox.openId);
+  const tv = t ? t.data() : {};
+  const who = tv.name || "Anonymous";
+  document.getElementById("dmOwnerName").textContent = who;
+  document.getElementById("dmOwnerSub").textContent = [tv.device, tv.countryName || tv.country].filter(Boolean).join(" · ") || "Private conversation";
+  const av = document.getElementById("dmOwnerAvatar");
+  av.textContent = [...who][0].toUpperCase();
+  av.style.setProperty("--h", hueFor(who));
+
+  const box = ownerOutbox ? { list: () => ownerOutbox.list().filter((m) => m.meta.thread === ownerInbox.openId) } : null;
+  const all = withOutbox(ownerInbox.msgs, box, (m) => ({ from: "admin", text: m.text, createdAt: { toDate: () => new Date(m.at) } }));
+  if (!all.length) {
+    dmList.replaceChildren(el("li", "chat-empty", "No messages in this conversation."));
+    return;
+  }
+  const docs = all.map((d) => ({
+    id: d.id,
+    outbox: d.outbox,
+    metadata: d.metadata,
+    data: (opts) => {
+      const v = d.data(opts);
+      const admin = v.from === "admin";
+      return { ...v, admin, name: admin ? profileNameNow() : who };
+    },
+  }));
+  renderList(docs, dmList, (id, m) => Boolean(m.admin), dmRx);
+  for (const d of all) rendered.add(d.id);
+}
+
+function openOwnerThread(id) {
+  if (ownerInbox.unsubMsgs) ownerInbox.unsubMsgs();
+  ownerInbox.openId = id;
+  ownerInbox.msgs = [];
+  if (dmRx) dmRx.stop();
+  dmRx = makeRx(["dms", id, "reactions"]);
+  if (dmRx) dmRx.start();
+  ownerInbox.unsubMsgs = onSnapshot(
+    query(collection(db, "dms", id, "messages"), orderBy("createdAt", "asc"), limit(300)),
+    { includeMetadataChanges: true },
+    (snap) => {
+      if (ownerInbox.openId !== id) return;
+      const stick = dmList.scrollHeight - dmList.scrollTop - dmList.clientHeight < 80 || !ownerInbox.msgs.length;
+      ownerInbox.msgs = snap.docs;
+      if (chatMode === "private") renderDm();
+      if (stick) dmList.scrollTop = dmList.scrollHeight;
+      markOwnerRead(id);
+    },
+    (err) => dmList.replaceChildren(el("li", "chat-empty", err.code === "permission-denied"
+      ? "Private messages aren't set up yet (Firestore rules)." : "This conversation can't be shown right now."))
+  );
+  renderDm();
+  textInput.placeholder = ownerPlaceholder();
+  markOwnerRead(id);
+  if (window.matchMedia("(hover: hover)").matches) textInput.focus({ preventScroll: true });
+}
+
+function closeOwnerThread() {
+  if (ownerInbox.unsubMsgs) ownerInbox.unsubMsgs();
+  ownerInbox.unsubMsgs = null;
+  ownerInbox.openId = null;
+  ownerInbox.msgs = [];
+  if (dmRx) dmRx.stop();
+  dmRx = null;
+  renderDm();
+  textInput.placeholder = ownerPlaceholder();
+}
+
+function startOwnerInbox() {
+  if (ownerInbox.active) return;
+  ownerInbox.active = true;
+  ownerInbox.primed = false;
+  ownerInbox.unsubThreads = onSnapshot(
+    query(collection(db, "dms"), orderBy("updatedAt", "desc"), limit(100)),
+    (snap) => {
+      ownerInbox.threads = snap.docs;
+      // A visitor wrote since the page loaded: sound, tab count, notification, notice
+      for (const d of snap.docs) {
+        const v = d.data();
+        const at = ownerMs(v.updatedAt);
+        const prev = ownerInbox.lastAt.get(d.id);
+        ownerInbox.lastAt.set(d.id, at);
+        if (!ownerInbox.primed || v.lastFrom !== "visitor" || !at || (prev !== undefined && at <= prev)) continue;
+        const reading = ownerInbox.openId === d.id && isOpen() && chatMode === "private" && window.Notify && window.Notify.isWatching();
+        if (reading) continue;
+        if (window.Notify) {
+          window.Notify.ping();
+          window.Notify.system({
+            title: `New private message from ${v.name || "Anonymous"}`,
+            body: v.lastText || "",
+            tag: `dm-${d.id}`,
+            onClick: () => { if (!isOpen()) open(); setMode("private"); openOwnerThread(d.id); },
+          });
+        }
+        if (document.visibilityState === "visible" && window.showToast) window.showToast(`💬 New private message from ${v.name || "Anonymous"}`);
+      }
+      ownerInbox.primed = true;
+      syncOwnerUnread();
+      if (ownerInbox.openId && !ownerThread(ownerInbox.openId)) closeOwnerThread();
+      else if (chatMode === "private") renderDm();
+    },
+    (err) => console.warn("Private messages not loaded:", err.code || err)
+  );
+  if (chatMode === "private") setMode("private");
+}
+
+function stopOwnerInbox() {
+  if (!ownerInbox.active) return;
+  if (ownerInbox.unsubThreads) ownerInbox.unsubThreads();
+  if (ownerInbox.unsubMsgs) ownerInbox.unsubMsgs();
+  Object.assign(ownerInbox, { active: false, threads: [], openId: null, msgs: [], unsubThreads: null, unsubMsgs: null, primed: false });
+  ownerInbox.lastAt.clear();
+  if (chatMode === "private") setMode("private");
+}
+
+// The owner's replies: instant, in order, retryable (outbox.js)
+const ownerOutbox = window.createOutbox ? window.createOutbox({
+  key: "owner-private",
+  maxLength: MAX_DM,
+  newId: () => doc(collection(db, "dms")).id,
+  onChange: () => {
+    if (chatMode === "private" && ownerInbox.openId) {
+      renderDm();
+      dmList.scrollTop = dmList.scrollHeight;
+    }
+  },
+  write: async (id, text, meta) => {
+    const threadRef = doc(db, "dms", meta.thread);
+    const ref = doc(threadRef, "messages", id);
+    try {
+      const batch = writeBatch(db);
+      batch.set(ref, { from: "admin", text, createdAt: serverTimestamp() });
+      batch.update(threadRef, {
+        lastText: text.slice(0, 120),
+        lastFrom: "admin",
+        updatedAt: serverTimestamp(),
+        adminReadAt: serverTimestamp(),
+      });
+      await batch.commit();
+    } catch (err) {
+      if (await alreadySaved(ref, err)) return;
+      throw err;
+    }
+  },
+}) : null;
+
+const ownerBack = document.getElementById("dmOwnerBack");
+if (ownerBack) ownerBack.addEventListener("click", closeOwnerThread);
 
 /* ---------- Keep the private chat after clearing the browser ---------- */
 // The chat belongs to the visitor's sign-in. An anonymous sign-in is lost when the browser
@@ -1219,9 +1460,10 @@ getRedirectResult(dmAuth)
 dmList.addEventListener("click", (e) => {
   const retry = e.target.closest("[data-retry]");
   const remove = e.target.closest("[data-discard]");
-  if (!dmOutbox || (!retry && !remove)) return;
-  if (retry) dmOutbox.retry(retry.dataset.retry);
-  else dmOutbox.discard(remove.dataset.discard);
+  const box = ownerInbox.active ? ownerOutbox : dmOutbox;
+  if (!box || (!retry && !remove)) return;
+  if (retry) box.retry(retry.dataset.retry);
+  else box.discard(remove.dataset.discard);
   setStatus("");
 });
 
