@@ -1078,3 +1078,20 @@ h1, h2, h3 { margin: 0; letter-spacing: -0.015em; }
 
   .input, .textarea, .field input { font-size: 16px; }   /* no iOS zoom */
 }
+
+/* Small "Admin" label next to the admin's name in the chat */
+.t-admin-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--brand);
+}
+
+.t-admin-tag::before {
+  content: "✓";
+  font-size: 9px;
+}

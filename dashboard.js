@@ -356,6 +356,7 @@ const chat = (() => {
       if (first) {
         const meta = el("div", "t-meta");
         meta.append(el("strong", "", m.admin ? (m.name || profileName) : (m.name || "Anonymous")));
+        if (m.admin) meta.append(el("span", "t-admin-tag", "Admin"));
         const where = [m.device, place(m.country, m.countryName)].filter(Boolean).join(" · ");
         if (where) meta.append(el("span", "", where));
         body.append(meta);
