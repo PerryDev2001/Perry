@@ -1217,9 +1217,45 @@ button.chip:hover { background: var(--accent); border-color: var(--ring); }
   gap: 6px;
 }
 
-@media (max-width: 560px) {
-  .row:has(.row-actions-stack) { flex-wrap: wrap; }
-  .row-actions-stack { flex-direction: row; width: 100%; padding-left: 48px; }
+/* ---------- Phones ---------- */
+@media (max-width: 640px) {
+  /* Header: just the page name, cut short if needed */
+  .crumbs > .muted,
+  .crumbs > .crumb-chev { display: none; }
+  .crumbs #crumb {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 600;
+  }
+
+  /* List rows: buttons go under the text, so the text keeps the full width */
+  .row {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    column-gap: 12px;
+    row-gap: 10px;
+  }
+
+  .row > .row-actions {
+    grid-column: 2;
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 6px;
+    justify-self: start;
+    margin-left: 0;
+  }
+
+  .row-body { overflow-wrap: anywhere; }
+
+  /* Card titles with a button beside them */
+  .card-header { flex-wrap: wrap; }
+
+  /* Pending / Approved filter fills the width */
+  .seg { display: flex; }
+  .seg-btn { flex: 1; justify-content: center; }
 }
 
 /* ---------- Pinned post card ---------- */
