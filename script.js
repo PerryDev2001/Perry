@@ -627,11 +627,11 @@ const ThemeReveal = {
 
     const target = e.target;
     state.overInteractive = !!(target.closest && target.closest(INTERACTIVE));
-    state.overCard = !!(target.closest && target.closest(".hero"));
+    state.overCard = !!(target.closest && target.closest(".card, .profile-head, .cover"));
     dot.classList.toggle("is-active", state.overInteractive);
   };
 
-  const inChat = (e) => !!(e.target && e.target.closest && e.target.closest(".chat, .viewers"));
+  const inChat = (e) => !!(e.target && e.target.closest && e.target.closest(".chat, .viewers, .topbar"));
 
   const onDown = (e) => {
     // Touches in the chat are for scrolling and typing, not for the hearts
@@ -727,4 +727,146 @@ const ThemeReveal = {
     frame.style.setProperty("--rx", "0deg");
     frame.style.setProperty("--ry", "0deg");
   });
+})();
+
+/* ---------- Pinned post: Like + Share ---------- */
+(() => {
+  const likeBtn = document.getElementById("postLike");
+  const shareBtn = document.getElementById("postShare");
+  const stats = document.getElementById("postStats");
+  if (!likeBtn || !shareBtn || !stats) return;
+
+  const KEY = "post-liked";
+  const getLiked = () => { try { return localStorage.getItem(KEY) === "1"; } catch { return false; } };
+  const setLiked = (v) => { try { localStorage.setItem(KEY, v ? "1" : "0"); } catch { /* ignore */ } };
+
+  const render = () => {
+    const liked = getLiked();
+    likeBtn.setAttribute("aria-pressed", String(liked));
+    stats.replaceChildren();
+    if (liked) {
+      const dot = document.createElement("span");
+      dot.className = "like-dot";
+      dot.innerHTML = '<svg class="icon icon-fill" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20.5s-7.5-4.6-9.6-9.2C.9 7.9 3 4 6.8 4c2.1 0 3.6 1.1 5.2 3 1.6-1.9 3.1-3 5.2-3 3.8 0 5.9 3.9 4.4 7.3-2.1 4.6-9.6 9.2-9.6 9.2Z"/></svg>';
+      stats.append(dot, "You liked this");
+    }
+  };
+
+  likeBtn.addEventListener("click", () => {
+    const liked = !getLiked();
+    setLiked(liked);
+    render();
+    if (liked) {
+      // A little pop of hearts from the button
+      const r = likeBtn.getBoundingClientRect();
+      window.dispatchEvent(new CustomEvent("hearts:burst", {
+        detail: { x: r.left + r.width / 2, y: r.top + r.height / 2, count: 10, speed: 3 },
+      }));
+    }
+  });
+
+  // Small message at the bottom of the screen
+  let toastTimer = 0;
+  const toast = (text) => {
+    let el = document.querySelector(".toast");
+    if (!el) {
+      el = document.createElement("div");
+      el.className = "toast";
+      el.setAttribute("role", "status");
+      document.body.append(el);
+    }
+    el.textContent = text;
+    requestAnimationFrame(() => el.classList.add("is-shown"));
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => el.classList.remove("is-shown"), 2200);
+  };
+
+  shareBtn.addEventListener("click", async () => {
+    const url = location.href.split("#")[0];
+    if (navigator.share) {
+      try { await navigator.share({ title: document.title, url }); } catch { /* cancelled */ }
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(url);
+      toast("Link copied");
+    } catch {
+      toast(url);
+    }
+  });
+
+  render();
+})();
+
+/* ---------- Fixed top bar: compact mode + section highlight ---------- */
+(() => {
+  const bar = document.getElementById("topbar");
+  const name = document.getElementById("name");
+  if (!bar || !name) return;
+
+  // Compact once the profile name has scrolled under the bar
+  const updateCompact = () => {
+    bar.classList.toggle("is-compact", name.getBoundingClientRect().bottom < bar.offsetHeight);
+  };
+
+  const links = [...document.querySelectorAll("a[data-section]")];
+  const indicator = bar.querySelector(".top-indicator");
+  const ids = ["posts", "about", "photos"];
+  const sections = ids.map((id) => document.getElementById(id)).filter(Boolean);
+
+  // Slide the pill behind the active link in the bar
+  const moveIndicator = () => {
+    const active = bar.querySelector(".top-link.is-active");
+    if (!active || !indicator) return;
+    indicator.style.setProperty("--x", `${active.offsetLeft - 4}px`);
+    indicator.style.setProperty("--w", `${active.offsetWidth}px`);
+  };
+
+  let current = "posts";
+  const setActive = (id) => {
+    current = id;
+    for (const l of links) {
+      const on = l.dataset.section === id;
+      l.classList.toggle("is-active", on);
+      if (on) l.setAttribute("aria-current", "page");
+      else l.removeAttribute("aria-current");
+    }
+    moveIndicator();
+  };
+
+  // Clicking a section link highlights it straight away
+  let lockedUntil = 0;
+  for (const l of links) {
+    l.addEventListener("click", () => {
+      setActive(l.dataset.section);
+      lockedUntil = performance.now() + 900;   // ignore scroll updates while it scrolls there
+    });
+  }
+
+  // On stacked (one-column) layouts, follow the section being read
+  const stacked = window.matchMedia("(max-width: 900px)");
+  let ticking = false;
+  const onScroll = () => {
+    updateCompact();
+    if (ticking) return;
+    ticking = true;
+    requestAnimationFrame(() => {
+      ticking = false;
+      if (!stacked.matches || performance.now() < lockedUntil) return;
+      const line = 120;
+      let best = null;
+      for (const s of sections) {
+        const top = s.getBoundingClientRect().top;
+        if (top <= line && (!best || top > best.top)) best = { id: s.id, top };
+      }
+      const id = best ? best.id : sections[0]?.id;
+      if (id && id !== current) setActive(id);
+    });
+  };
+
+  window.addEventListener("scroll", onScroll, { passive: true });
+  window.addEventListener("resize", moveIndicator);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(moveIndicator);
+  setActive(current);
+  updateCompact();
 })();

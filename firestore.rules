@@ -3,7 +3,20 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Public chat: anyone can read and post; nobody can edit or delete.
+    // An admin is a signed-in user that has a document at /admins/{their uid}.
+    // Admin documents can only be created in the Firebase console (never from the website).
+    function isAdmin() {
+      return request.auth != null &&
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    // Admins list: each admin can read only their own entry; nobody can write from the site.
+    match /admins/{uid} {
+      allow read: if request.auth != null && request.auth.uid == uid;
+      allow write: if false;
+    }
+
+    // Public chat: anyone can read and post; only admins can delete; nobody can edit.
     match /messages/{messageId} {
       allow read: if true;
 
@@ -23,12 +36,13 @@ service cloud.firestore {
         request.resource.data.countryName.size() <= 56 &&
         request.resource.data.createdAt == request.time;
 
-      allow update, delete: if false;
+      allow update: if false;
+      allow delete: if isAdmin();
     }
 
     // Visitors: one document per visitor (keyed by a one-way IP code or a browser key).
     // Anyone can read the list. A first visit creates the document; later visits may only
-    // refresh lastSeen. Nobody can delete.
+    // refresh lastSeen. Only admins can delete.
     match /visits/{visitId} {
       allow read: if true;
 
@@ -49,7 +63,81 @@ service cloud.firestore {
         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastSeen']) &&
         request.resource.data.lastSeen == request.time;
 
-      allow delete: if false;
+      allow delete: if isAdmin();
+    }
+
+    // Comments on the pinned post: anyone can read. Posting needs an (anonymous) sign-in;
+    // the author can edit the text or delete it, and admins can delete any comment.
+    match /comments/{commentId} {
+      allow read: if true;
+
+      allow create: if
+        request.auth != null &&
+        request.resource.data.keys().hasOnly(['post', 'uid', 'name', 'text', 'device', 'country', 'countryName', 'createdAt']) &&
+        request.resource.data.keys().hasAll(['post', 'uid', 'name', 'text', 'device', 'country', 'countryName', 'createdAt']) &&
+        request.resource.data.uid == request.auth.uid &&
+        request.resource.data.post == 'pinned' &&
+        request.resource.data.text is string &&
+        request.resource.data.text.size() > 0 &&
+        request.resource.data.text.size() <= 300 &&
+        request.resource.data.name is string &&
+        request.resource.data.name.size() <= 24 &&
+        request.resource.data.device is string &&
+        request.resource.data.device.size() <= 40 &&
+        request.resource.data.country is string &&
+        request.resource.data.country.size() <= 2 &&
+        request.resource.data.countryName is string &&
+        request.resource.data.countryName.size() <= 56 &&
+        request.resource.data.createdAt == request.time;
+
+      allow update: if
+        request.auth != null &&
+        resource.data.uid == request.auth.uid &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['text', 'editedAt']) &&
+        request.resource.data.text is string &&
+        request.resource.data.text.size() > 0 &&
+        request.resource.data.text.size() <= 300 &&
+        request.resource.data.editedAt == request.time;
+
+      allow delete: if
+        isAdmin() ||
+        (request.auth != null && resource.data.uid == request.auth.uid);
+    }
+
+    // Posts shown on the profile page: anyone can read; only admins can write (text only for now).
+    match /posts/{postId} {
+      allow read: if true;
+
+      allow create: if
+        isAdmin() &&
+        request.resource.data.keys().hasOnly(['text', 'createdAt']) &&
+        request.resource.data.text is string &&
+        request.resource.data.text.size() > 0 &&
+        request.resource.data.text.size() <= 5000 &&
+        request.resource.data.createdAt == request.time;
+
+      allow update: if false;
+      allow delete: if isAdmin();
+    }
+
+    // Site settings (the public profile): anyone can read; only admins can change.
+    match /site/{docId} {
+      allow read: if true;
+
+      allow write: if
+        isAdmin() &&
+        docId == 'profile' &&
+        request.resource.data.keys().hasOnly(['name', 'role', 'bio', 'bioRef', 'updatedAt']) &&
+        request.resource.data.name is string &&
+        request.resource.data.name.size() > 0 &&
+        request.resource.data.name.size() <= 60 &&
+        request.resource.data.role is string &&
+        request.resource.data.role.size() <= 60 &&
+        request.resource.data.bio is string &&
+        request.resource.data.bio.size() <= 300 &&
+        request.resource.data.bioRef is string &&
+        request.resource.data.bioRef.size() <= 60 &&
+        request.resource.data.updatedAt == request.time;
     }
 
     // Everything else is closed.

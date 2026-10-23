@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="robots" content="noindex" />
+  <meta name="color-scheme" content="light dark" />
+  <title>Dashboard — Perry Philip Lozano</title>
+
+  <script>
+    try {
+      const t = localStorage.getItem("calling-card-theme") ||
+        (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+      document.documentElement.setAttribute("data-theme", t);
+    } catch { /* ignore */ }
+  </script>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..800&family=Sora:wght@600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="admin.css" />
+</head>
+<body class="dash-page is-checking">
+  <!-- Shown until the admin check passes -->
+  <div class="gate" id="gate">
+    <span class="spinner" aria-hidden="true"></span>
+    <p>Checking your access…</p>
+  </div>
+
+  <div class="dash" id="dash" hidden>
+    <!-- Sidebar -->
+    <aside class="dash-side">
+      <a class="dash-brand" href="index.html" title="Open the public page">
+        <img id="sideAvatar" src="img/ppl.jpg" alt="" width="40" height="40" />
+        <span>
+          <strong id="sideName">Perry Philip Lozano</strong>
+          <small>Admin dashboard</small>
+        </span>
+      </a>
+
+      <nav class="dash-nav" aria-label="Dashboard">
+        <a href="#overview" data-tab="overview">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="9" rx="2" /><rect x="14" y="3" width="7" height="5" rx="2" /><rect x="14" y="12" width="7" height="9" rx="2" /><rect x="3" y="16" width="7" height="5" rx="2" /></svg>
+          Overview
+        </a>
+        <a href="#posts" data-tab="posts">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="3" /><path d="M8 9h8M8 13h8M8 17h5" /></svg>
+          Posts
+        </a>
+        <a href="#comments" data-tab="comments">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 9.3 9.3 0 0 1-3.6-.7L3 21l1.6-4.6A8 8 0 0 1 3 11.5 8.6 8.6 0 0 1 12 3a8.6 8.6 0 0 1 9 8.5Z" /></svg>
+          Comments
+        </a>
+        <a href="#messages" data-tab="messages">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v8a2.5 2.5 0 0 1-2.5 2.5H11l-4.5 3.5V17A2.5 2.5 0 0 1 4 14.5v-8Z" /></svg>
+          Messages
+        </a>
+        <a href="#visitors" data-tab="visitors">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z" /><circle cx="12" cy="12" r="3" /></svg>
+          Visitors
+        </a>
+        <a href="#profile" data-tab="profile">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.5" /><path d="M5 20a7 7 0 0 1 14 0" /></svg>
+          Profile
+        </a>
+      </nav>
+
+      <div class="dash-side-foot">
+        <a class="btn btn-ghost btn-block" href="index.html" target="_blank" rel="noopener">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" /></svg>
+          View site
+        </a>
+        <button class="btn btn-ghost btn-block" type="button" id="signOut">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4M10 16l-4-4 4-4M6 12h10" /></svg>
+          Sign out
+        </button>
+        <p class="dash-who" id="whoami"></p>
+      </div>
+    </aside>
+
+    <!-- Main -->
+    <main class="dash-main">
+      <!-- Overview -->
+      <section class="panel" id="tab-overview" data-panel="overview">
+        <header class="panel-head">
+          <h1>Overview</h1>
+          <p>Everything happening on your page.</p>
+        </header>
+        <div class="stats">
+          <a class="stat" href="#visitors"><span class="stat-value" id="countVisitors">–</span><span class="stat-label">Unique visitors</span></a>
+          <a class="stat" href="#messages"><span class="stat-value" id="countMessages">–</span><span class="stat-label">Chat messages</span></a>
+          <a class="stat" href="#comments"><span class="stat-value" id="countComments">–</span><span class="stat-label">Comments</span></a>
+          <a class="stat" href="#posts"><span class="stat-value" id="countPosts">–</span><span class="stat-label">Posts</span></a>
+        </div>
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-head"><h2>Latest comments</h2><a class="link-btn" href="#comments">Manage</a></div>
+            <ul class="mini-list" id="ovComments"><li class="empty">Loading…</li></ul>
+          </div>
+          <div class="card">
+            <div class="card-head"><h2>Latest messages</h2><a class="link-btn" href="#messages">See all</a></div>
+            <ul class="mini-list" id="ovMessages"><li class="empty">Loading…</li></ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- Posts -->
+      <section class="panel" id="tab-posts" data-panel="posts" hidden>
+        <header class="panel-head">
+          <h1>Posts</h1>
+          <p>New posts appear on your profile page, newest first. Text only for now.</p>
+        </header>
+
+        <form class="card composer" id="postForm">
+          <h2>New post</h2>
+          <textarea id="postText" rows="4" maxlength="5000" placeholder="What's on your mind?"></textarea>
+          <div class="composer-row">
+            <!-- Photo upload is turned off for now -->
+            <button class="btn btn-ghost" type="button" disabled title="Photo upload is coming soon">
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="3" /><circle cx="9" cy="10" r="1.8" /><path d="m21 16-5-5-8 8" /></svg>
+              Photo · coming soon
+            </button>
+            <span class="hint" id="postHint"></span>
+            <button class="btn btn-primary" type="submit" id="postSubmit">Publish</button>
+          </div>
+          <p class="form-message" id="postMessage" role="status" hidden></p>
+        </form>
+
+        <div class="card">
+          <div class="card-head"><h2>Published</h2><span class="muted" id="postCount"></span></div>
+          <ul class="admin-list" id="postList"><li class="empty">Loading…</li></ul>
+        </div>
+      </section>
+
+      <!-- Comments -->
+      <section class="panel" id="tab-comments" data-panel="comments" hidden>
+        <header class="panel-head">
+          <h1>Comments</h1>
+          <p>All comments on your pinned post. Deleting removes them for everyone.</p>
+        </header>
+        <div class="card">
+          <ul class="admin-list" id="commentList"><li class="empty">Loading…</li></ul>
+          <button class="btn btn-ghost btn-block more" type="button" id="commentMore" hidden>Load more</button>
+        </div>
+      </section>
+
+      <!-- Messages -->
+      <section class="panel" id="tab-messages" data-panel="messages" hidden>
+        <header class="panel-head">
+          <h1>Messages</h1>
+          <p>Everything sent in the public chat, newest first.</p>
+        </header>
+        <div class="card">
+          <ul class="admin-list" id="messageList"><li class="empty">Loading…</li></ul>
+          <button class="btn btn-ghost btn-block more" type="button" id="messageMore" hidden>Load more</button>
+        </div>
+      </section>
+
+      <!-- Visitors -->
+      <section class="panel" id="tab-visitors" data-panel="visitors" hidden>
+        <header class="panel-head">
+          <h1>Visitors</h1>
+          <p>Every unique visitor, most recently active first.</p>
+        </header>
+        <div class="card">
+          <ul class="admin-list" id="visitorList"><li class="empty">Loading…</li></ul>
+          <button class="btn btn-ghost btn-block more" type="button" id="visitorMore" hidden>Load more</button>
+        </div>
+      </section>
+
+      <!-- Profile -->
+      <section class="panel" id="tab-profile" data-panel="profile" hidden>
+        <header class="panel-head">
+          <h1>Profile</h1>
+          <p>Changes show on your public page right away.</p>
+        </header>
+        <form class="card profile-form" id="profileForm">
+          <div class="photo-edit">
+            <img id="profilePhotoPreview" src="img/ppl.jpg" alt="Profile photo" width="120" height="120" />
+            <div>
+              <!-- Photo upload is turned off for now -->
+              <button class="btn btn-ghost" type="button" disabled title="Photo upload is coming soon">
+                <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="3" /><circle cx="9" cy="10" r="1.8" /><path d="m21 16-5-5-8 8" /></svg>
+                Change photo · coming soon
+              </button>
+              <p class="hint">Changing the profile photo isn't available yet.</p>
+            </div>
+          </div>
+
+          <label class="field">
+            <span>Name</span>
+            <input id="profileName" type="text" maxlength="60" required />
+          </label>
+          <label class="field">
+            <span>Role / title</span>
+            <input id="profileRole" type="text" maxlength="60" />
+          </label>
+          <label class="field">
+            <span>Bio / verse</span>
+            <textarea id="profileBio" rows="3" maxlength="300"></textarea>
+          </label>
+          <label class="field">
+            <span>Bio source (e.g. Proverbs 16:3)</span>
+            <input id="profileBioRef" type="text" maxlength="60" />
+          </label>
+
+          <div class="composer-row">
+            <span class="hint" id="profileHint"></span>
+            <button class="btn btn-primary" type="submit" id="profileSubmit">Save profile</button>
+          </div>
+          <p class="form-message" id="profileMessage" role="status" hidden></p>
+        </form>
+      </section>
+    </main>
+  </div>
+
+  <script src="firebase-config.js"></script>
+  <script src="dashboard.js" defer></script>
+</body>
+</html>

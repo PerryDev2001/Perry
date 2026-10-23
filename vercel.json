@@ -1,0 +1,6 @@
+{
+  "redirects": [
+    { "source": "/administrator", "destination": "/login.html", "permanent": false },
+    { "source": "/administrator/", "destination": "/login.html", "permanent": false }
+  ]
+}

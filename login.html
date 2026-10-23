@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="robots" content="noindex" />
+  <meta name="color-scheme" content="light dark" />
+  <title>Admin sign in — Perry Philip Lozano</title>
+
+  <!-- Apply the saved theme before anything paints -->
+  <script>
+    try {
+      const t = localStorage.getItem("calling-card-theme") ||
+        (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+      document.documentElement.setAttribute("data-theme", t);
+    } catch { /* ignore */ }
+  </script>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..800&family=Sora:wght@600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="admin.css" />
+</head>
+<body class="login-page">
+  <main class="login-wrap">
+    <a class="login-back" href="index.html">
+      <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6" /></svg>
+      Back to profile
+    </a>
+
+    <section class="login-card" aria-labelledby="loginTitle">
+      <div class="login-badge" aria-hidden="true">
+        <svg class="icon" viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="10" rx="2.5" /><path d="M8 10V7a4 4 0 0 1 8 0v3" /></svg>
+      </div>
+      <h1 class="login-title" id="loginTitle">Admin sign in</h1>
+      <p class="login-sub">Only admins can open the dashboard.</p>
+
+      <form class="login-form" id="loginForm" novalidate>
+        <label class="field">
+          <span>Email</span>
+          <input id="loginEmail" type="email" autocomplete="username" required placeholder="you@example.com" />
+        </label>
+
+        <label class="field">
+          <span>Password</span>
+          <span class="password-wrap">
+            <input id="loginPassword" type="password" autocomplete="current-password" required placeholder="••••••••" />
+            <button class="password-toggle" type="button" id="passwordToggle" aria-label="Show password" aria-pressed="false">
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z" /><circle cx="12" cy="12" r="3" /></svg>
+            </button>
+          </span>
+        </label>
+
+        <p class="form-message" id="loginMessage" role="alert" hidden></p>
+
+        <button class="btn btn-primary btn-block" type="submit" id="loginSubmit">Sign in</button>
+        <button class="link-btn" type="button" id="forgotPassword">Forgot password?</button>
+      </form>
+    </section>
+  </main>
+
+  <script src="firebase-config.js"></script>
+  <script src="login.js" defer></script>
+</body>
+</html>
