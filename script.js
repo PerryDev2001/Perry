@@ -729,41 +729,11 @@ const ThemeReveal = {
   });
 })();
 
-/* ---------- Pinned post: Like + Share ---------- */
+/* ---------- Pinned post: Share ---------- */
+// (Likes are saved in Firestore, one per device — see chat.js)
 (() => {
-  const likeBtn = document.getElementById("postLike");
   const shareBtn = document.getElementById("postShare");
-  const stats = document.getElementById("postStats");
-  if (!likeBtn || !shareBtn || !stats) return;
-
-  const KEY = "post-liked";
-  const getLiked = () => { try { return localStorage.getItem(KEY) === "1"; } catch { return false; } };
-  const setLiked = (v) => { try { localStorage.setItem(KEY, v ? "1" : "0"); } catch { /* ignore */ } };
-
-  const render = () => {
-    const liked = getLiked();
-    likeBtn.setAttribute("aria-pressed", String(liked));
-    stats.replaceChildren();
-    if (liked) {
-      const dot = document.createElement("span");
-      dot.className = "like-dot";
-      dot.innerHTML = '<svg class="icon icon-fill" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20.5s-7.5-4.6-9.6-9.2C.9 7.9 3 4 6.8 4c2.1 0 3.6 1.1 5.2 3 1.6-1.9 3.1-3 5.2-3 3.8 0 5.9 3.9 4.4 7.3-2.1 4.6-9.6 9.2-9.6 9.2Z"/></svg>';
-      stats.append(dot, "You liked this");
-    }
-  };
-
-  likeBtn.addEventListener("click", () => {
-    const liked = !getLiked();
-    setLiked(liked);
-    render();
-    if (liked) {
-      // A little pop of hearts from the button
-      const r = likeBtn.getBoundingClientRect();
-      window.dispatchEvent(new CustomEvent("hearts:burst", {
-        detail: { x: r.left + r.width / 2, y: r.top + r.height / 2, count: 10, speed: 3 },
-      }));
-    }
-  });
+  if (!shareBtn) return;
 
   // Small message at the bottom of the screen
   let toastTimer = 0;
@@ -794,8 +764,6 @@ const ThemeReveal = {
       toast(url);
     }
   });
-
-  render();
 })();
 
 /* ---------- Fixed top bar: compact mode + section highlight ---------- */

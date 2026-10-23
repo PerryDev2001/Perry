@@ -6,13 +6,13 @@ const SDK = "https://www.gstatic.com/firebasejs/10.12.2";
 const statusBox = document.getElementById("chatStatus");
 
 let initializeApp, getAnalytics, isSupported;
-let getFirestore, collection, addDoc, query, orderBy, limit, onSnapshot, serverTimestamp, getCountFromServer;
+let getFirestore, collection, addDoc, query, orderBy, limit, onSnapshot, serverTimestamp, getCountFromServer, where;
 let doc, getDoc, setDoc, updateDoc, getDocs, startAfter, deleteDoc;
 let getAuth, signInAnonymously, onAuthStateChanged;
 try {
   ({ initializeApp } = await import(`${SDK}/firebase-app.js`));
   ({ getAnalytics, isSupported } = await import(`${SDK}/firebase-analytics.js`));
-  ({ getFirestore, collection, addDoc, query, orderBy, limit, onSnapshot, serverTimestamp, getCountFromServer,
+  ({ getFirestore, collection, addDoc, query, orderBy, limit, onSnapshot, serverTimestamp, getCountFromServer, where,
      doc, getDoc, setDoc, updateDoc, getDocs, startAfter, deleteDoc } =
     await import(`${SDK}/firebase-firestore.js`));
   ({ getAuth, signInAnonymously, onAuthStateChanged } = await import(`${SDK}/firebase-auth.js`));
@@ -232,7 +232,6 @@ const renderMessage = (id, m, { first, last }) => {
   if (first && !own) {
     const meta = el("div", "msg-meta");
     meta.append(el("span", "msg-name", name));
-    if (m.admin) meta.append(el("span", "msg-admin-tag", "Admin"));
     if (m.device) meta.append(el("span", "msg-origin", m.device));
     if (m.country) {
       // Windows can't draw flag emoji, so show the country code there instead
@@ -959,113 +958,144 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && vOpen()) closeViewers();
 });
 
-/* ---------- Comments on the pinned post (own collection, separate from the chat) ---------- */
+/* ---------- Comments: one thread per post (the pinned post + every dashboard post) ---------- */
+// All comments live in the "comments" collection with a "post" field ("pinned" or a post id).
 // Each commenter gets a private anonymous Firebase sign-in, so only the browser that wrote a
-// comment can edit or delete it (enforced by firestore.rules).
+// comment can edit or delete it; admins can delete any comment (enforced by firestore.rules).
 const commentsRef = collection(db, "comments");
-const COMMENTS_PAGE = 20;
+const COMMENTS_STEP = 20;
 const MAX_COMMENT = 300;
 const COMMENT_COOLDOWN_MS = 5000;
-const POST_ID = "pinned";
 
-const cSection = document.getElementById("comments");
-const cList = document.getElementById("commentList");
-const cMore = document.getElementById("commentsMore");
-const cForm = document.getElementById("commentForm");
-const cName = document.getElementById("commentName");
-const cText = document.getElementById("commentText");
-const cSend = document.getElementById("commentSend");
-const cStatus = document.getElementById("commentStatus");
-const cCount = document.getElementById("commentCount");
-const cBadge = document.getElementById("commentsBadge");
-const cChars = document.getElementById("commentChars");
-const cToggle = document.getElementById("postComment");
-const cMe = document.getElementById("commentMe");
+const commentAuth = getAuth(app);
+let commentUid = null;
+let commentAdmin = false;
+let lastComment = 0;
+const legacyMine = new Set(store.get("comment-mine", []));   // comments posted before sign-in existed
+const threads = new Map();   // postId -> thread controller
 
-if (cSection && cList && cForm) {
-  const auth = getAuth(app);
-  let myUid = null;
-  const legacyMine = new Set(store.get("comment-mine", []));   // comments posted before sign-in existed
+const ensureCommentUser = async () => commentAuth.currentUser || (await signInAnonymously(commentAuth)).user;
 
-  const ensureSignedIn = async () => {
-    if (auth.currentUser) return auth.currentUser;
-    const cred = await signInAnonymously(auth);
-    return cred.user;
-  };
+const explainComment = (err, action) => {
+  const code = (err && err.code) || "";
+  if (code === "auth/configuration-not-found") return "Comments need Firebase Authentication (Authentication → Get started, then turn on Anonymous).";
+  if (code === "auth/operation-not-allowed" || code === "auth/admin-restricted-operation") return "Comments need Anonymous sign-in turned on in Firebase (Authentication → Sign-in method).";
+  if (code === "auth/unauthorized-domain") return `Add "${location.hostname}" in Firebase → Authentication → Settings → Authorized domains.`;
+  if (code === "auth/operation-not-supported-in-this-environment" || location.protocol === "file:") return "Commenting needs the page to be opened from a website (http/https), not as a file.";
+  if (code === "permission-denied") return `Couldn't ${action}: the Firestore rules don't allow it yet.`;
+  return `Couldn't ${action}. Please try again.`;
+};
 
-  let liveComments = [];     // newest page, kept live
-  let olderComments = [];    // pages loaded with "View earlier comments"
-  let moreComments = false;
-  let commentTotal = null;
-  let lastComment = 0;
-  let commentsLoaded = false;
-  let editingId = null;      // comment being edited
-  let confirmingId = null;   // comment waiting for "Delete?" confirmation
+const commentIcon = (paths, cls = "icon") => {
+  const svgEl = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svgEl.setAttribute("viewBox", "0 0 24 24");
+  svgEl.setAttribute("class", cls);
+  svgEl.setAttribute("aria-hidden", "true");
+  svgEl.innerHTML = paths;   // fixed markup, never user text
+  return svgEl;
+};
 
-  const setCStatus = (text) => {
-    cStatus.textContent = text;
-    cStatus.hidden = !text;
-  };
+const QUICK_EMOJI = ["😂", "❤️", "🔥", "👏", "🙏", "😍", "💚"];
 
-  const explain = (err, action) => {
-    const code = (err && err.code) || "";
-    if (code === "auth/configuration-not-found") {
-      return "Comments need Firebase Authentication: open Authentication in the Firebase console, click Get started, then turn on Anonymous.";
-    }
-    if (code === "auth/operation-not-allowed" || code === "auth/admin-restricted-operation") {
-      return "Comments need Anonymous sign-in turned on in Firebase (Authentication → Sign-in method → Anonymous).";
-    }
-    if (code === "auth/unauthorized-domain") {
-      return `This website address isn't allowed yet: add "${location.hostname}" in Firebase (Authentication → Settings → Authorized domains).`;
-    }
-    if (code === "auth/operation-not-supported-in-this-environment" || location.protocol === "file:") {
-      return "Commenting needs the page to be opened from a website (http/https), not as a file on your computer.";
-    }
-    if (err && err.code === "permission-denied") {
-      return `Couldn't ${action}: the Firestore rules don't allow it yet.`;
-    }
-    return `Couldn't ${action}. Please try again.`;
-  };
+// Builds the comment section markup for one post
+const buildCommentSection = (postId) => {
+  const section = el("section", "comments");
+  section.dataset.comments = postId;
+  section.setAttribute("aria-label", "Comments");
+  section.hidden = true;
 
-  // Name is shared with the chat ("chat-name")
-  cName.value = store.get("chat-name", "");
+  const head = el("div", "comments-head");
+  const title = el("h3", "comments-title", "Comments");
+  const badge = el("span", "comments-badge", "0");
+  title.append(badge);
+  const sort = el("span", "comments-sort");
+  sort.append(commentIcon('<path d="M7 4v16M3 16l4 4 4-4M14 6h7M14 11h5M14 16h3"/>'), "Oldest first");
+  head.append(title, sort);
+
+  const more = el("button", "comments-more");
+  more.type = "button";
+  more.hidden = true;
+  more.append(commentIcon('<path d="m6 15 6-6 6 6"/>'), "View earlier comments");
+
+  const list = el("ul", "comment-list");
+  list.append(el("li", "comment-empty", "Loading comments…"));
+
+  const form = el("form", "comment-form");
+  form.autocomplete = "off";
+  const me = el("span", "comment-me", "?");
+  me.setAttribute("aria-hidden", "true");
+  const box = el("div", "comment-box");
+  const nameRow = el("label", "comment-name-row");
+  const nameInput2 = el("input", "comment-name");
+  nameInput2.type = "text";
+  nameInput2.maxLength = 24;
+  nameInput2.placeholder = "Anonymous";
+  nameInput2.autocomplete = "nickname";
+  nameRow.append(el("span", "", "Commenting as"), nameInput2, commentIcon('<path d="M4 20h4L19 9l-4-4L4 16v4ZM14 6l4 4"/>', "icon comment-name-pen"));
+  const compose = el("div", "comment-compose");
+  const text = el("textarea", "comment-text");
+  text.rows = 1;
+  text.maxLength = MAX_COMMENT;
+  text.placeholder = "Write a comment…";
+  text.setAttribute("aria-label", "Write a comment");
+  const chars = el("span", "comment-count");
+  chars.hidden = true;
+  const send = el("button", "comment-send");
+  send.type = "submit";
+  send.disabled = true;
+  send.setAttribute("aria-label", "Post comment");
+  send.append(commentIcon('<path d="M3.4 20.4 21 12 3.4 3.6 3.4 10l12.6 2-12.6 2Z"/>', "icon icon-fill"));
+  compose.append(text, chars, send);
+  const quick = el("div", "comment-quick");
+  quick.setAttribute("role", "group");
+  quick.setAttribute("aria-label", "Quick emoji");
+  for (const e of QUICK_EMOJI) {
+    const b = el("button", "", e);
+    b.type = "button";
+    b.dataset.emoji = e;
+    b.setAttribute("aria-label", `Add ${e}`);
+    quick.append(b);
+  }
+  box.append(nameRow, compose, quick);
+  form.append(me, box);
+
+  const status = el("p", "comment-status");
+  status.setAttribute("role", "status");
+  status.hidden = true;
+
+  section.append(head, more, list, form, status);
+  return { section, badge, more, list, form, me, nameInput: nameInput2, text, chars, send, status };
+};
+
+const createThread = (postId) => {
+  const ui = buildCommentSection(postId);
+  let docs = [];
+  let shown = COMMENTS_STEP;
+  let loaded = false;
+  let editingId = null;
+  let confirmingId = null;
+  const seen = new Set();
+
+  const setStatus2 = (t) => { ui.status.textContent = t; ui.status.hidden = !t; };
+
+  // Name (shared with the chat and all other threads)
   const showMe = () => {
-    const n = cName.value.trim() || "Anonymous";
-    cMe.textContent = [...n][0].toUpperCase();
-    cMe.style.setProperty("--h", hueFor(n));
+    const n = ui.nameInput.value.trim() || "Anonymous";
+    ui.me.textContent = [...n][0].toUpperCase();
+    ui.me.style.setProperty("--h", hueFor(n));
   };
+  ui.nameInput.value = store.get("chat-name", "");
   showMe();
-  cName.addEventListener("input", showMe);
-  if (nameInput) nameInput.addEventListener("change", () => { cName.value = nameInput.value.trim(); showMe(); });
-  cName.addEventListener("change", () => {
-    const n = cName.value.trim().slice(0, MAX_NAME);
+  ui.nameInput.addEventListener("input", showMe);
+  ui.nameInput.addEventListener("change", () => {
+    const n = ui.nameInput.value.trim().slice(0, MAX_NAME);
     store.set("chat-name", n);
     if (nameInput) nameInput.value = n;
+    for (const t of threads.values()) t.syncName(n);
   });
 
-  const showCount = () => {
-    const n = commentTotal || 0;
-    cBadge.textContent = n.toLocaleString();
-    if (!n) { cCount.hidden = true; return; }
-    cCount.hidden = false;
-    cCount.textContent = `${n.toLocaleString()} ${n === 1 ? "comment" : "comments"}`;
-  };
-
-  const refreshCount = () =>
-    getCountFromServer(commentsRef).then((s) => { commentTotal = s.data().count; showCount(); }).catch(() => {});
-
-  const isMine = (d, c) => (c.uid && myUid && c.uid === myUid) || (!c.uid && legacyMine.has(d.id));
-  const canManage = (c) => Boolean(c.uid && myUid && c.uid === myUid);
-  let siteAdmin = false;   // signed in as an admin (email account listed in /admins)
-
-  const iconSvg = (paths, cls = "icon") => {
-    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-    svg.setAttribute("viewBox", "0 0 24 24");
-    svg.setAttribute("class", cls);
-    svg.setAttribute("aria-hidden", "true");
-    svg.innerHTML = paths;   // fixed markup, never user text
-    return svg;
-  };
+  const isMine = (d, c) => (c.uid && commentUid && c.uid === commentUid) || (!c.uid && legacyMine.has(d.id));
+  const canManage = (c) => Boolean(c.uid && commentUid && c.uid === commentUid);
 
   const actionBtn = (label, action, id) => {
     const b = el("button", `comment-action${action === "delete" ? " is-danger" : ""}`, label);
@@ -1079,12 +1109,12 @@ if (cSection && cList && cForm) {
     const c = d.data({ serverTimestamps: "estimate" });
     const name = c.name || "Anonymous";
     const date = c.createdAt?.toDate?.();
-    const mine = isMine(d, c);
+    const mineC = isMine(d, c);
 
     const li = el("li", "comment");
     li.dataset.id = d.id;
-    if (mine) li.classList.add("is-mine");
-    if (commentsLoaded && !rendered.has("c:" + d.id)) li.classList.add("is-new");
+    if (mineC) li.classList.add("is-mine");
+    if (loaded && !seen.has(d.id)) li.classList.add("is-new");
 
     const avatar = el("span", "comment-avatar", [...name][0].toUpperCase());
     avatar.style.setProperty("--h", hueFor(name));
@@ -1092,29 +1122,25 @@ if (cSection && cList && cForm) {
 
     const body = el("div", "comment-body");
     const bubble = el("div", "comment-bubble");
-
-    const head = el("div", "comment-head");
-    head.append(el("span", "comment-author", name));
-    if (mine) head.append(el("span", "viewer-you", "You"));
+    const headEl = el("div", "comment-head");
+    headEl.append(el("span", "comment-author", name));
+    if (mineC) headEl.append(el("span", "viewer-you", "You"));
     if (c.device || c.country) {
       const chip = el("span", "comment-device");
-      if (c.device) {
-        chip.append(iconSvg(DEVICE_ICONS[deviceKind(c.device)]), el("span", "", c.device));
-      }
+      if (c.device) chip.append(commentIcon(DEVICE_ICONS[deviceKind(c.device)]), el("span", "", c.device));
       if (c.country) chip.append(el("span", "comment-flag", NO_FLAGS ? c.country : flag(c.country)));
       if (c.countryName) chip.title = c.countryName;
-      head.append(chip);
+      headEl.append(chip);
     }
-    bubble.append(head);
+    bubble.append(headEl);
 
     if (editingId === d.id) {
-      // Inline editor
       const editor = el("textarea", "comment-edit");
       editor.value = c.text;
       editor.maxLength = MAX_COMMENT;
       editor.rows = 2;
-      editor.setAttribute("aria-label", "Edit your comment");
       editor.dataset.id = d.id;
+      editor.setAttribute("aria-label", "Edit your comment");
       bubble.append(editor);
       bubble.classList.add("is-editing");
       requestAnimationFrame(() => { editor.focus(); editor.setSelectionRange(editor.value.length, editor.value.length); });
@@ -1136,9 +1162,8 @@ if (cSection && cList && cForm) {
     } else {
       meta.append(actionBtn("Reply", "reply", d.id));
       if (canManage(c)) meta.append(actionBtn("Edit", "edit", d.id), actionBtn("Delete", "delete", d.id));
-      else if (siteAdmin) meta.append(actionBtn("Delete", "delete", d.id));
-      // Posted before edit/delete existed: there's no owner to check, so it can't be changed
-      else if (mine && !c.uid) {
+      else if (commentAdmin) meta.append(actionBtn("Delete", "delete", d.id));
+      else if (mineC && !c.uid) {
         const note = el("span", "comment-edited", "Posted before editing was added");
         note.title = "Older comments have no owner ID, so they can't be edited or deleted from the site.";
         meta.append(note);
@@ -1150,240 +1175,350 @@ if (cSection && cList && cForm) {
     return li;
   };
 
-  const allComments = () => {
-    const live = new Set(liveComments.map((d) => d.id));
-    // Oldest first, like a conversation
-    return [...olderComments.filter((d) => !live.has(d.id)).slice().reverse(), ...liveComments.slice().reverse()];
+  const showCount = () => {
+    const n = docs.length;
+    ui.badge.textContent = n.toLocaleString();
+    for (const b of document.querySelectorAll(`[data-comment-count="${CSS.escape(postId)}"]`)) {
+      b.hidden = !n;
+      b.textContent = `${n.toLocaleString()} ${n === 1 ? "comment" : "comments"}`;
+    }
   };
 
-  const findComment = (id) => allComments().find((d) => d.id === id);
-
-  const renderComments = () => {
-    const all = allComments();
-    if (!all.length) {
+  const render = () => {
+    const visible = docs.slice(Math.max(0, docs.length - shown));   // newest N, oldest first
+    if (!docs.length) {
       const empty = el("li", "comment-empty");
       empty.append(
-        iconSvg('<path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 9.3 9.3 0 0 1-3.6-.7L3 21l1.6-4.6A8 8 0 0 1 3 11.5 8.6 8.6 0 0 1 12 3a8.6 8.6 0 0 1 9 8.5Z"/>', "icon comment-empty-icon"),
+        commentIcon('<path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 9.3 9.3 0 0 1-3.6-.7L3 21l1.6-4.6A8 8 0 0 1 3 11.5 8.6 8.6 0 0 1 12 3a8.6 8.6 0 0 1 9 8.5Z"/>', "icon comment-empty-icon"),
         el("strong", "", "No comments yet"),
         el("span", "", "Be the first to say something nice 💚")
       );
-      cList.replaceChildren(empty);
+      ui.list.replaceChildren(empty);
     } else {
-      cList.replaceChildren(...all.map(renderComment));
-      for (const d of all) rendered.add("c:" + d.id);
+      ui.list.replaceChildren(...visible.map(renderComment));
     }
-    cMore.hidden = !moreComments;
+    for (const d of visible) seen.add(d.id);
+    ui.more.hidden = docs.length <= shown;
+    showCount();
   };
 
-  onAuthStateChanged(auth, async (user) => {
-    myUid = user ? user.uid : null;
-    siteAdmin = false;
-    if (user && !user.isAnonymous) {
-      try { siteAdmin = (await getDoc(doc(db, "admins", user.uid))).exists(); } catch { siteAdmin = false; }
-    }
-    if (commentsLoaded) renderComments();
-  });
+  const find = (id) => docs.find((d) => d.id === id);
 
+  // Live comments for this post (sorted on the device, so no extra Firestore index is needed)
   onSnapshot(
-    query(commentsRef, orderBy("createdAt", "desc"), limit(COMMENTS_PAGE)),
+    query(commentsRef, where("post", "==", postId)),
     (snap) => {
-      liveComments = snap.docs;
-      // Deleted comments must disappear from older pages too
-      const gone = new Set(snap.docChanges().filter((ch) => ch.type === "removed").map((ch) => ch.doc.id));
-      if (gone.size) olderComments = olderComments.filter((d) => !gone.has(d.id));
-      if (!olderComments.length) moreComments = snap.docs.length === COMMENTS_PAGE;
-      if (editingId && !findComment(editingId)) editingId = null;
-      renderComments();
-      commentsLoaded = true;
-      refreshCount();
+      docs = snap.docs.slice().sort((a, b) => {
+        const ta = a.data({ serverTimestamps: "estimate" }).createdAt?.toMillis?.() ?? a.data({ serverTimestamps: "estimate" }).createdAt?.toDate?.().getTime() ?? 0;
+        const tb = b.data({ serverTimestamps: "estimate" }).createdAt?.toMillis?.() ?? b.data({ serverTimestamps: "estimate" }).createdAt?.toDate?.().getTime() ?? 0;
+        return ta - tb;
+      });
+      if (editingId && !find(editingId)) editingId = null;
+      render();
+      loaded = true;
     },
     (err) => {
       console.error(err);
-      cList.replaceChildren(el("li", "comment-empty",
+      ui.list.replaceChildren(el("li", "comment-empty",
         err.code === "permission-denied" ? "Comments aren't set up yet (Firestore rules)." : "Comments can't be shown right now."));
     }
   );
 
-  cMore.addEventListener("click", async () => {
-    const oldest = (olderComments.length ? olderComments : liveComments).at(-1);
-    if (!oldest) return;
-    cMore.disabled = true;
-    try {
-      const snap = await getDocs(query(commentsRef, orderBy("createdAt", "desc"), startAfter(oldest), limit(COMMENTS_PAGE)));
-      olderComments = olderComments.concat(snap.docs);
-      moreComments = snap.docs.length === COMMENTS_PAGE;
-      renderComments();
-    } catch (err) {
-      console.error(err);
-    } finally {
-      cMore.disabled = false;
-    }
-  });
+  ui.more.addEventListener("click", () => { shown += COMMENTS_STEP; render(); });
 
-  /* Reply / edit / delete */
   const saveEdit = async (id) => {
-    const editor = cList.querySelector(`.comment-edit[data-id="${CSS.escape(id)}"]`);
+    const editor = ui.list.querySelector(`.comment-edit[data-id="${CSS.escape(id)}"]`);
     if (!editor) return;
-    const text = editor.value.replace(/\s+\n/g, "\n").trim().slice(0, MAX_COMMENT);
-    const current = findComment(id);
-    if (!text) { setCStatus("A comment can't be empty. Use Delete to remove it."); return; }
-    if (current && text === current.data().text) { editingId = null; renderComments(); return; }
+    const t = editor.value.replace(/\s+\n/g, "\n").trim().slice(0, MAX_COMMENT);
+    const current = find(id);
+    if (!t) { setStatus2("A comment can't be empty. Use Delete to remove it."); return; }
+    if (current && t === current.data().text) { editingId = null; render(); return; }
     editor.disabled = true;
     try {
-      await ensureSignedIn();
-      await updateDoc(doc(commentsRef, id), { text, editedAt: serverTimestamp() });
+      await ensureCommentUser();
+      await updateDoc(doc(commentsRef, id), { text: t, editedAt: serverTimestamp() });
       editingId = null;
-      setCStatus("");
+      setStatus2("");
     } catch (err) {
       console.error(err);
       editor.disabled = false;
-      setCStatus(explain(err, "save your edit"));
+      setStatus2(explainComment(err, "save your edit"));
     }
   };
 
-  cList.addEventListener("click", async (e) => {
+  ui.list.addEventListener("click", async (e) => {
     const b = e.target.closest(".comment-action");
     if (!b) return;
     const { action, id } = b.dataset;
-    const d = findComment(id);
-
+    const d = find(id);
     if (action === "reply" && d) {
-      const name = d.data().name || "Anonymous";
-      const mention = `@${name} `;
-      if (!cText.value.startsWith(mention)) cText.value = mention + cText.value;
-      cText.dispatchEvent(new Event("input"));
-      cText.focus();
-      cText.setSelectionRange(cText.value.length, cText.value.length);
-      cForm.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      const mention = `@${d.data().name || "Anonymous"} `;
+      if (!ui.text.value.startsWith(mention)) ui.text.value = mention + ui.text.value;
+      ui.text.dispatchEvent(new Event("input"));
+      ui.text.focus();
+      ui.text.setSelectionRange(ui.text.value.length, ui.text.value.length);
+      ui.form.scrollIntoView({ behavior: "smooth", block: "nearest" });
       return;
     }
-    if (action === "edit") { editingId = id; confirmingId = null; renderComments(); return; }
-    if (action === "delete") { confirmingId = id; editingId = null; renderComments(); return; }
-    if (action === "cancel") { editingId = null; confirmingId = null; setCStatus(""); renderComments(); return; }
+    if (action === "edit") { editingId = id; confirmingId = null; render(); return; }
+    if (action === "delete") { confirmingId = id; editingId = null; render(); return; }
+    if (action === "cancel") { editingId = null; confirmingId = null; setStatus2(""); render(); return; }
     if (action === "save") { saveEdit(id); return; }
-
     if (action === "delete-yes") {
       b.disabled = true;
       try {
-        await ensureSignedIn();
+        await ensureCommentUser();
         await deleteDoc(doc(commentsRef, id));
         confirmingId = null;
-        setCStatus("");
+        setStatus2("");
       } catch (err) {
         console.error(err);
         b.disabled = false;
-        setCStatus(explain(err, "delete the comment"));
+        setStatus2(explainComment(err, "delete the comment"));
       }
     }
   });
 
-  // Editor keys: Enter saves, Escape cancels
-  cList.addEventListener("keydown", (e) => {
+  ui.list.addEventListener("keydown", (e) => {
     const editor = e.target.closest(".comment-edit");
     if (!editor) return;
     if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); saveEdit(editor.dataset.id); }
-    if (e.key === "Escape") { e.stopPropagation(); editingId = null; renderComments(); }
+    if (e.key === "Escape") { e.stopPropagation(); editingId = null; render(); }
   });
 
-  /* Open / close the comment section (it stays on the post — no chat) */
-  const openComments = (focus) => {
-    cSection.hidden = false;
-    requestAnimationFrame(() => cSection.classList.add("is-open"));
-    cToggle.setAttribute("aria-expanded", "true");
-    cToggle.classList.add("is-active");
-    if (focus) cText.focus({ preventScroll: true });
-    cSection.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  // Composer
+  const grow = () => {
+    ui.text.style.height = "auto";
+    ui.text.style.height = `${Math.min(ui.text.scrollHeight, 120)}px`;
+    ui.send.disabled = !ui.text.value.trim();
+    const left = MAX_COMMENT - ui.text.value.length;
+    ui.chars.hidden = left > 50;
+    ui.chars.textContent = String(left);
+    ui.chars.classList.toggle("is-low", left <= 10);
   };
-
-  const closeComments = () => {
-    cSection.classList.remove("is-open");
-    cSection.hidden = true;
-    cToggle.setAttribute("aria-expanded", "false");
-    cToggle.classList.remove("is-active");
-  };
-
-  cToggle.addEventListener("click", () => {
-    if (cSection.hidden) openComments(true);
-    else cText.focus();
-  });
-  cCount.addEventListener("click", () => (cSection.hidden ? openComments(false) : closeComments()));
-
-  /* Composer */
-  const growComment = () => {
-    cText.style.height = "auto";
-    cText.style.height = `${Math.min(cText.scrollHeight, 120)}px`;
-    cSend.disabled = !cText.value.trim();
-    const left = MAX_COMMENT - cText.value.length;
-    cChars.hidden = left > 50;
-    cChars.textContent = String(left);
-    cChars.classList.toggle("is-low", left <= 10);
-  };
-  cText.addEventListener("input", growComment);
-  cText.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
-      e.preventDefault();
-      cForm.requestSubmit();
-    }
+  ui.text.addEventListener("input", grow);
+  ui.text.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); ui.form.requestSubmit(); }
   });
 
-  // Quick emoji buttons insert at the cursor
-  cForm.querySelector(".comment-quick")?.addEventListener("click", (e) => {
+  ui.form.querySelector(".comment-quick").addEventListener("click", (e) => {
     const b = e.target.closest("[data-emoji]");
     if (!b) return;
     const emoji = b.dataset.emoji;
-    const start = cText.selectionStart ?? cText.value.length;
-    const end = cText.selectionEnd ?? cText.value.length;
-    const next = cText.value.slice(0, start) + emoji + cText.value.slice(end);
+    const start = ui.text.selectionStart ?? ui.text.value.length;
+    const end = ui.text.selectionEnd ?? ui.text.value.length;
+    const next = ui.text.value.slice(0, start) + emoji + ui.text.value.slice(end);
     if (next.length > MAX_COMMENT) return;
-    cText.value = next;
-    cText.setSelectionRange(start + emoji.length, start + emoji.length);
-    cText.focus();
-    growComment();
+    ui.text.value = next;
+    ui.text.setSelectionRange(start + emoji.length, start + emoji.length);
+    ui.text.focus();
+    grow();
     b.animate([{ transform: "scale(1.4)" }, { transform: "scale(1)" }], { duration: 250, easing: "ease-out" });
   });
 
-  cForm.addEventListener("submit", async (e) => {
+  ui.form.addEventListener("submit", async (e) => {
     e.preventDefault();
-    const text = cText.value.replace(/\s+\n/g, "\n").trim().slice(0, MAX_COMMENT);
-    if (!text) return;
-
+    const t = ui.text.value.replace(/\s+\n/g, "\n").trim().slice(0, MAX_COMMENT);
+    if (!t) return;
     const wait = COMMENT_COOLDOWN_MS - (Date.now() - lastComment);
-    if (wait > 0) {
-      setCStatus(`Please wait ${Math.ceil(wait / 1000)}s before commenting again.`);
-      return;
-    }
+    if (wait > 0) { setStatus2(`Please wait ${Math.ceil(wait / 1000)}s before commenting again.`); return; }
 
-    const name = cName.value.trim().slice(0, MAX_NAME);
+    const name = ui.nameInput.value.trim().slice(0, MAX_NAME);
     store.set("chat-name", name);
     if (nameInput) nameInput.value = name;
 
-    cSend.disabled = true;
+    ui.send.disabled = true;
     try {
-      const [user, device, country] = await Promise.all([ensureSignedIn(), detectDevice(), detectCountry()]);
+      const [u, device, country] = await Promise.all([ensureCommentUser(), detectDevice(), detectCountry()]);
       await addDoc(commentsRef, {
-        post: POST_ID,
-        uid: user.uid,
+        post: postId,
+        uid: u.uid,
         name,
-        text,
+        text: t,
         device: device.slice(0, 40),
         country: country.code,
         countryName: country.name,
         createdAt: serverTimestamp(),
       });
       lastComment = Date.now();
-      cText.value = "";
-      setCStatus("");
+      ui.text.value = "";
+      setStatus2("");
     } catch (err) {
       console.error(err);
-      setCStatus(explain(err, "post your comment"));
+      setStatus2(explainComment(err, "post your comment"));
     } finally {
-      growComment();
+      grow();
     }
   });
 
-  // Keep "5m" style times fresh (not while editing)
-  setInterval(() => { if (!cSection.hidden && !editingId) renderComments(); }, 60 * 1000);
+  return {
+    section: ui.section,
+    render,
+    syncName: (n) => { ui.nameInput.value = n; showMe(); },
+    open: (focus) => {
+      ui.section.hidden = false;
+      requestAnimationFrame(() => ui.section.classList.add("is-open"));
+      for (const b of document.querySelectorAll(`[data-comment-btn="${CSS.escape(postId)}"]`)) {
+        b.setAttribute("aria-expanded", "true");
+        b.classList.add("is-active");
+      }
+      if (focus) ui.text.focus({ preventScroll: true });
+      ui.section.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    },
+    close: () => {
+      ui.section.classList.remove("is-open");
+      ui.section.hidden = true;
+      for (const b of document.querySelectorAll(`[data-comment-btn="${CSS.escape(postId)}"]`)) {
+        b.setAttribute("aria-expanded", "false");
+        b.classList.remove("is-active");
+      }
+    },
+    isOpen: () => !ui.section.hidden,
+  };
+};
+
+// One thread per post, kept across re-renders of the posts feed
+const commentThread = (postId) => {
+  if (!threads.has(postId)) threads.set(postId, createThread(postId));
+  return threads.get(postId);
+};
+
+// Comment button opens the thread; the "N comments" link toggles it
+document.addEventListener("click", (e) => {
+  const open = e.target.closest("[data-comment-btn]");
+  if (open) {
+    const t = commentThread(open.dataset.commentBtn);
+    if (t.isOpen()) t.section.querySelector(".comment-text")?.focus();
+    else t.open(true);
+    return;
+  }
+  const count = e.target.closest("[data-comment-count]");
+  if (count) {
+    const t = commentThread(count.dataset.commentCount);
+    if (t.isOpen()) t.close(); else t.open(false);
+  }
+});
+
+// Signed in? (anonymous for visitors, email for admins)
+onAuthStateChanged(commentAuth, async (u) => {
+  commentUid = u ? u.uid : null;
+  commentAdmin = false;
+  if (u && !u.isAnonymous) {
+    try { commentAdmin = (await getDoc(doc(db, "admins", u.uid))).exists(); } catch { commentAdmin = false; }
+  }
+  for (const t of threads.values()) t.render();
+});
+
+// The chat's name box keeps the comment boxes in sync
+if (nameInput) nameInput.addEventListener("change", () => {
+  for (const t of threads.values()) t.syncName(nameInput.value.trim());
+});
+
+// Pinned post thread (its section sits in index.html)
+{
+  const holder = document.querySelector('[data-comments-slot="pinned"]');
+  if (holder) holder.replaceWith(commentThread("pinned").section);
 }
+
+/* ---------- Likes: one per device, saved in Firestore ---------- */
+// Each browser gets an invisible anonymous sign-in (no account). A like is the document
+// "likes/{postId}_{that id}", so a device can like a post once and un-like it again.
+const likesRef = collection(db, "likes");
+const likeAuth = getAuth(app);
+let likeUid = likeAuth.currentUser ? likeAuth.currentUser.uid : null;
+const likeState = new Map();   // postId -> { docs: [], unsub }
+
+const HEART_PATH = "M12 20.5s-7.5-4.6-9.6-9.2C.9 7.9 3 4 6.8 4c2.1 0 3.6 1.1 5.2 3 1.6-1.9 3.1-3 5.2-3 3.8 0 5.9 3.9 4.4 7.3-2.1 4.6-9.6 9.2-9.6 9.2Z";
+
+const likeId = (postId, uid) => `${postId}_${uid}`;
+
+const renderLikes = (postId) => {
+  const st = likeState.get(postId);
+  const docs = st ? st.docs : [];
+  const count = docs.length;
+  const mine = Boolean(likeUid && docs.some((d) => d.data().uid === likeUid));
+
+  for (const btn of document.querySelectorAll(`[data-like-btn="${CSS.escape(postId)}"]`)) {
+    btn.setAttribute("aria-pressed", String(mine));
+    btn.setAttribute("aria-label", mine ? "Unlike" : "Like");
+  }
+
+  for (const stats of document.querySelectorAll(`[data-like-stats="${CSS.escape(postId)}"]`)) {
+    stats.replaceChildren();
+    stats.removeAttribute("title");
+    if (!count) continue;
+
+    const dot = el("span", "like-dot");
+    dot.innerHTML = `<svg class="icon icon-fill" viewBox="0 0 24 24" aria-hidden="true"><path d="${HEART_PATH}"/></svg>`;   // fixed markup
+    const others = count - (mine ? 1 : 0);
+    const text = mine
+      ? (others ? `You and ${others.toLocaleString()} ${others === 1 ? "other" : "others"}` : "You liked this")
+      : `${count.toLocaleString()} ${count === 1 ? "like" : "likes"}`;
+    stats.append(dot, text);
+
+    // Hover: which devices liked it
+    const devices = docs.map((d) => d.data().device || "Unknown device");
+    const shown = devices.slice(0, 12).join(", ");
+    stats.title = `Liked on: ${shown}${devices.length > 12 ? ` and ${devices.length - 12} more` : ""}`;
+  }
+};
+
+// Start listening to a post's likes (once per post)
+const watchLikes = (postId) => {
+  if (likeState.has(postId)) { renderLikes(postId); return; }
+  const st = { docs: [], unsub: null };
+  likeState.set(postId, st);
+  st.unsub = onSnapshot(
+    query(likesRef, where("post", "==", postId)),
+    (snap) => { st.docs = snap.docs; renderLikes(postId); },
+    (err) => console.warn("Likes not loaded:", err.code || err)
+  );
+};
+
+onAuthStateChanged(likeAuth, (u) => {
+  likeUid = u ? u.uid : null;
+  for (const id of likeState.keys()) renderLikes(id);
+});
+
+const likeBusy = new Set();
+document.addEventListener("click", async (e) => {
+  const btn = e.target.closest("[data-like-btn]");
+  if (!btn) return;
+  const postId = btn.dataset.likeBtn;
+  if (likeBusy.has(postId)) return;
+  likeBusy.add(postId);
+
+  const wasLiked = btn.getAttribute("aria-pressed") === "true";
+  // Show it straight away; the live listener confirms it
+  btn.setAttribute("aria-pressed", String(!wasLiked));
+  if (!wasLiked) {
+    const r = btn.getBoundingClientRect();
+    window.dispatchEvent(new CustomEvent("hearts:burst", {
+      detail: { x: r.left + r.width / 2, y: r.top + r.height / 2, count: 10, speed: 3 },
+    }));
+  }
+
+  try {
+    const u = likeAuth.currentUser || (await signInAnonymously(likeAuth)).user;
+    likeUid = u.uid;
+    const ref = doc(likesRef, likeId(postId, u.uid));
+    if (wasLiked) {
+      await deleteDoc(ref);
+    } else {
+      const device = await detectDevice();
+      await setDoc(ref, { post: postId, uid: u.uid, device: device.slice(0, 40), createdAt: serverTimestamp() });
+    }
+  } catch (err) {
+    console.error(err);
+    btn.setAttribute("aria-pressed", String(wasLiked));
+    renderLikes(postId);
+  } finally {
+    likeBusy.delete(postId);
+  }
+});
+
+watchLikes("pinned");
+
 /* ---------- Profile + posts managed from the admin dashboard ---------- */
 const DEFAULT_PROFILE = {
   name: "Perry Philip Lozano",
@@ -1453,6 +1588,35 @@ const renderPost = (d) => {
   head.append(avatar, who);
 
   article.append(head, el("p", "post-text", p.text));
+
+  // Likes (one per device) for this post
+  const stats = el("div", "post-stats");
+  const likes = el("span", "post-likes");
+  likes.dataset.likeStats = d.id;
+  const commentCount = el("button", "post-comment-count");
+  commentCount.type = "button";
+  commentCount.dataset.commentCount = d.id;
+  commentCount.hidden = true;
+  stats.append(likes, commentCount);
+  const actions = el("div", "post-actions");
+  const like = el("button", "post-action");
+  like.type = "button";
+  like.dataset.likeBtn = d.id;
+  like.setAttribute("aria-pressed", "false");
+  like.innerHTML = `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="${HEART_PATH}"/></svg>`;   // fixed markup
+  like.append(" Like");
+  const comment = el("button", "post-action");
+  comment.type = "button";
+  comment.dataset.commentBtn = d.id;
+  comment.setAttribute("aria-expanded", "false");
+  comment.innerHTML = '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 9.3 9.3 0 0 1-3.6-.7L3 21l1.6-4.6A8 8 0 0 1 3 11.5 8.6 8.6 0 0 1 12 3a8.6 8.6 0 0 1 9 8.5Z"/></svg>';   // fixed markup
+  comment.append(" Comment");
+  actions.append(like, comment);
+
+  // This post's comment thread (kept alive across re-renders of the feed)
+  const thread = commentThread(d.id);
+  article.append(stats, actions, thread.section);
+  queueMicrotask(() => { watchLikes(d.id); thread.render(); });
   return article;
 };
 

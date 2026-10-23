@@ -1,6 +1,8 @@
 {
+  "cleanUrls": true,
   "redirects": [
-    { "source": "/administrator", "destination": "/login.html", "permanent": false },
-    { "source": "/administrator/", "destination": "/login.html", "permanent": false }
+    { "source": "/index", "destination": "/", "permanent": true },
+    { "source": "/administrator", "destination": "/login", "permanent": false },
+    { "source": "/administrator/", "destination": "/login", "permanent": false }
   ]
 }

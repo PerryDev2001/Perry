@@ -81,7 +81,7 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
-    // Comments on the pinned post: anyone can read. Posting needs an (anonymous) sign-in;
+    // Comments on the pinned post or any post: anyone can read. Posting needs an (anonymous) sign-in;
     // the author can edit the text or delete it, and admins can delete any comment.
     match /comments/{commentId} {
       allow read: if true;
@@ -91,7 +91,10 @@ service cloud.firestore {
         request.resource.data.keys().hasOnly(['post', 'uid', 'name', 'text', 'device', 'country', 'countryName', 'createdAt']) &&
         request.resource.data.keys().hasAll(['post', 'uid', 'name', 'text', 'device', 'country', 'countryName', 'createdAt']) &&
         request.resource.data.uid == request.auth.uid &&
-        request.resource.data.post == 'pinned' &&
+        request.resource.data.post is string &&
+        request.resource.data.post.size() <= 40 &&
+        (request.resource.data.post == 'pinned' ||
+          exists(/databases/$(database)/documents/posts/$(request.resource.data.post))) &&
         request.resource.data.text is string &&
         request.resource.data.text.size() > 0 &&
         request.resource.data.text.size() <= 300 &&
@@ -153,6 +156,31 @@ service cloud.firestore {
         request.resource.data.bioRef is string &&
         request.resource.data.bioRef.size() <= 60 &&
         request.resource.data.updatedAt == request.time;
+    }
+
+    // Likes: one per device (anonymous sign-in) per post. The document ID must be
+    // "{post}_{the device's uid}", so a device can't like the same post twice.
+    // Anyone can read; a device can only add or remove its own like.
+    match /likes/{likeId} {
+      allow read: if true;
+
+      allow create: if
+        request.auth != null &&
+        request.resource.data.keys().hasOnly(['post', 'uid', 'device', 'createdAt']) &&
+        request.resource.data.keys().hasAll(['post', 'uid', 'device', 'createdAt']) &&
+        request.resource.data.uid == request.auth.uid &&
+        request.resource.data.post is string &&
+        request.resource.data.post.size() > 0 &&
+        request.resource.data.post.size() <= 40 &&
+        likeId == request.resource.data.post + '_' + request.auth.uid &&
+        request.resource.data.device is string &&
+        request.resource.data.device.size() <= 40 &&
+        request.resource.data.createdAt == request.time;
+
+      allow update: if false;
+      allow delete: if
+        isAdmin() ||
+        (request.auth != null && resource.data.uid == request.auth.uid);
     }
 
     // Everything else is closed.

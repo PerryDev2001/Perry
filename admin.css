@@ -1079,19 +1079,85 @@ h1, h2, h3 { margin: 0; letter-spacing: -0.015em; }
   .input, .textarea, .field input { font-size: 16px; }   /* no iOS zoom */
 }
 
-/* Small "Admin" label next to the admin's name in the chat */
-.t-admin-tag {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--brand);
+
+/* ---------- Comments & likes: one card per post ---------- */
+.post-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
 
-.t-admin-tag::before {
-  content: "✓";
-  font-size: 9px;
+.post-group { gap: 14px; }
+
+.pg-head {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
 }
+
+.pg-text {
+  margin: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 500;
+  white-space: pre-wrap;
+}
+
+.pg-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 10px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--foreground);
+  background: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.chip .icon { width: 14px; height: 14px; color: var(--muted-foreground); }
+button.chip:hover { background: var(--accent); border-color: var(--ring); }
+.chip-static { cursor: default; }
+.chip-chev { transition: transform 0.2s ease; }
+.chip[aria-expanded="true"] .chip-chev { transform: rotate(180deg); }
+
+.like-list {
+  margin: -4px 0 0;
+  padding: 8px 12px;
+  list-style: none;
+  background: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) - 2px);
+}
+
+.like-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  font-size: 13px;
+  border-top: 1px solid var(--border);
+}
+
+.like-row:first-child { border-top: 0; }
+.like-row .row-time { margin-left: auto; }
+.like-heart { width: 13px; height: 13px; color: #e11d48; fill: currentColor; stroke: none; }
+.like-list .empty { padding: 6px 0; }
+
+.pg-comments .empty { padding: 4px 0; }

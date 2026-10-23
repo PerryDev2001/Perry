@@ -2736,20 +2736,3 @@ html.theme-switching * {
 
 /* Admins don't type a name: their profile is used */
 .chat-form.is-admin .chat-name-row { display: none; }
-
-/* Small "Admin" label next to the admin's name in the chat */
-.msg-admin-tag {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--accent-text);
-}
-
-.msg-admin-tag::before {
-  content: "✓";
-  font-size: 9px;
-}

@@ -24,7 +24,7 @@ const auth = A.getAuth();
 const db = F.getFirestore();
 const {
   collection, doc, getDoc, setDoc, addDoc, deleteDoc, query, orderBy, limit, startAfter,
-  getDocs, onSnapshot, serverTimestamp, getCountFromServer,
+  getDocs, onSnapshot, serverTimestamp, getCountFromServer, where,
 } = F;
 
 /* ---------- Helpers ---------- */
@@ -356,7 +356,6 @@ const chat = (() => {
       if (first) {
         const meta = el("div", "t-meta");
         meta.append(el("strong", "", m.admin ? (m.name || profileName) : (m.name || "Anonymous")));
-        if (m.admin) meta.append(el("span", "t-admin-tag", "Admin"));
         const where = [m.device, place(m.country, m.countryName)].filter(Boolean).join(" · ");
         if (where) meta.append(el("span", "", where));
         body.append(meta);
@@ -478,22 +477,99 @@ const loaders = {
     chat.start();
   },
 
-  comments: pagedList({
-    name: "comments",
-    listEl: document.getElementById("commentList"),
-    moreBtn: document.getElementById("commentMore"),
-    order: "createdAt",
-    emptyText: "No comments yet.",
-    render: (d) => {
-      const c = d.data();
-      return listRow(d, {
-        title: c.name || "Anonymous",
-        sub: [c.device, place(c.country, c.countryName)].filter(Boolean).join(" · "),
-        body: c.text,
-        time: `${fullDate(c.createdAt?.toDate?.())}${c.editedAt ? " · edited" : ""}`,
+  comments() {
+    const wrap = document.getElementById("commentGroups");
+    const HEART = '<path d="M12 20.5s-7.5-4.6-9.6-9.2C.9 7.9 3 4 6.8 4c2.1 0 3.6 1.1 5.2 3 1.6-1.9 3.1-3 5.2-3 3.8 0 5.9 3.9 4.4 7.3-2.1 4.6-9.6 9.2-9.6 9.2Z"/>';
+    const BUBBLE = '<path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/>';
+    const CHEV = '<path d="m6 9 6 6 6-6"/>';
+    const time = (x) => x.createdAt?.toDate?.()?.getTime?.() || 0;
+
+    // One card per post: preview, likes (expandable), and its comments
+    const group = (post) => {
+      const card = el("article", "card post-group");
+
+      const head = el("div", "pg-head");
+      const label = el("span", `badge ${post.id === "pinned" ? "badge-brand" : "badge-outline"}`, post.id === "pinned" ? "Pinned" : (post.date ? shortDate(post.date) : "Post"));
+      const text = el("p", "pg-text", post.text || "(no text)");
+      head.append(label, text);
+
+      const stats = el("div", "pg-stats");
+      const likeBtn = el("button", "chip");
+      likeBtn.type = "button";
+      likeBtn.setAttribute("aria-expanded", "false");
+      const likeLabel = el("span", "", "0 likes");
+      likeBtn.append(svg(HEART), likeLabel, svg(CHEV, "icon chip-chev"));
+      const commentChip = el("span", "chip chip-static");
+      const commentLabel = el("span", "", "0 comments");
+      commentChip.append(svg(BUBBLE), commentLabel);
+      stats.append(likeBtn, commentChip);
+
+      const likePanel = el("ul", "like-list");
+      likePanel.hidden = true;
+      likeBtn.addEventListener("click", () => {
+        likePanel.hidden = !likePanel.hidden;
+        likeBtn.setAttribute("aria-expanded", String(!likePanel.hidden));
       });
-    },
-  }),
+
+      const list = el("ul", "list pg-comments");
+      list.append(el("li", "empty", "Loading comments…"));
+
+      card.append(head, stats, likePanel, list);
+
+      onSnapshot(
+        query(collection(db, "likes"), where("post", "==", post.id)),
+        (snap) => {
+          const n = snap.size;
+          likeLabel.textContent = `${n.toLocaleString()} ${n === 1 ? "like" : "likes"}`;
+          const docs = snap.docs.slice().sort((a, b) => time(b.data()) - time(a.data()));
+          likePanel.replaceChildren(...(docs.length
+            ? docs.map((d) => {
+              const v = d.data();
+              const li = el("li", "like-row");
+              li.append(svg(HEART, "icon like-heart"), el("span", "", v.device || "Unknown device"), el("span", "row-time", ago(v.createdAt?.toDate?.())));
+              return li;
+            })
+            : [el("li", "empty", "No likes yet.")]));
+        },
+        (err) => { likeLabel.textContent = "Likes unavailable"; console.warn(err); }
+      );
+
+      onSnapshot(
+        query(collection(db, "comments"), where("post", "==", post.id)),
+        (snap) => {
+          const n = snap.size;
+          commentLabel.textContent = `${n.toLocaleString()} ${n === 1 ? "comment" : "comments"}`;
+          const docs = snap.docs.slice().sort((a, b) => time(b.data()) - time(a.data()));   // newest first
+          list.replaceChildren(...(docs.length
+            ? docs.map((d) => {
+              const c = d.data();
+              return listRow(d, {
+                title: c.name || "Anonymous",
+                sub: [c.device, place(c.country, c.countryName)].filter(Boolean).join(" · "),
+                body: c.text,
+                time: `${fullDate(c.createdAt?.toDate?.())}${c.editedAt ? " · edited" : ""}`,
+              });
+            })
+            : [el("li", "empty", "No comments on this post yet.")]));
+        },
+        (err) => list.replaceChildren(el("li", "empty", errText(err, "load comments")))
+      );
+
+      return card;
+    };
+
+    (async () => {
+      const profile = await loadProfile();
+      const posts = [{ id: "pinned", text: profile.bioRef ? `${profile.bio} — ${profile.bioRef}` : profile.bio, date: null }];
+      try {
+        const snap = await getDocs(query(collection(db, "posts"), orderBy("createdAt", "desc")));
+        for (const d of snap.docs) posts.push({ id: d.id, text: d.data().text, date: d.data().createdAt?.toDate?.() });
+      } catch (err) {
+        console.error(err);
+      }
+      wrap.replaceChildren(...posts.map(group));
+    })();
+  },
 
   visitors: pagedList({
     name: "visits",
