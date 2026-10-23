@@ -8,6 +8,20 @@ const submit = document.getElementById("loginSubmit");
 const message = document.getElementById("loginMessage");
 const forgot = document.getElementById("forgotPassword");
 const toggle = document.getElementById("passwordToggle");
+const label = submit.querySelector(".btn-label");
+
+// Theme toggle (same setting as the public page)
+document.getElementById("themeBtn")?.addEventListener("click", () => {
+  const next = document.documentElement.getAttribute("data-theme") === "dark" ? "light" : "dark";
+  document.documentElement.setAttribute("data-theme", next);
+  try { localStorage.setItem("calling-card-theme", next); } catch { /* ignore */ }
+});
+
+const setLoading = (on) => {
+  submit.disabled = on;
+  submit.classList.toggle("is-loading", on);
+  label.textContent = on ? "Signing in…" : "Sign in";
+};
 
 const show = (text, kind = "error") => {
   message.textContent = text;
@@ -91,8 +105,7 @@ form.addEventListener("submit", async (e) => {
     show("Enter your email and password.");
     return;
   }
-  submit.disabled = true;
-  submit.textContent = "Signing in…";
+  setLoading(true);
   try {
     const { user } = await signIn(auth, email.value.trim(), password.value);
     if (await isAdmin(user)) {
@@ -107,8 +120,7 @@ form.addEventListener("submit", async (e) => {
       ? "Signed in, but the admin check was blocked. Publish the latest Firestore rules."
       : explain(err));
   } finally {
-    submit.disabled = false;
-    submit.textContent = "Sign in";
+    setLoading(false);
   }
 });
 

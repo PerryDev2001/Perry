@@ -2681,3 +2681,58 @@ html.theme-switching * {
 @media (max-width: 560px) {
   .posts-feed { gap: 12px; }
 }
+
+/* ==========================================================================
+   Admin messages in the chat (profile photo, name, Admin badge)
+   ========================================================================== */
+.msg-avatar.is-photo {
+  padding: 0;
+  overflow: hidden;
+  background: var(--grad);
+  visibility: hidden;
+}
+
+.msg.is-last .msg-avatar.is-photo { visibility: visible; }
+
+.msg-avatar.is-photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 50% 30%;
+  border: 2px solid var(--card-solid);
+  border-radius: inherit;
+}
+
+.msg-admin-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--on-accent);
+  background: var(--grad);
+  border-radius: 999px;
+}
+
+/* Admin bubbles from others' point of view: a soft mint outline */
+.msg.is-admin:not(.is-mine) .msg-text {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
+.chat-admin-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 0 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.chat-admin-note strong { color: var(--fg); }
+.chat-admin-note[hidden] { display: none; }
+
+/* Admins don't type a name: their profile is used */
+.chat-form.is-admin .chat-name-row { display: none; }

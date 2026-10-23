@@ -38,6 +38,12 @@ isSupported().then((ok) => ok && getAnalytics(app)).catch(() => {});
 const db = getFirestore(app);
 const messagesRef = collection(db, "messages");
 
+// Signed in as an admin? Then chat messages go out as the admin's profile (photo, name, badge).
+let chatAdminUid = null;
+let lastMessageDocs = [];
+const profilePhoto = () => document.querySelector(".profile-avatar")?.getAttribute("src") || "img/ppl.jpg";
+const profileNameNow = () => document.getElementById("name")?.textContent.trim() || "Perry Philip Lozano";
+
 const HISTORY = 100;          // messages loaded
 const MAX_TEXT = 500;
 const MAX_NAME = 24;
@@ -189,12 +195,13 @@ const stampLabel = (date) => {
 };
 
 
-const senderKey = (id, m) => (mine.has(id) ? "me" : `${m.name}|${m.device}|${m.country}`);
+const isOwnMsg = (id, m) => mine.has(id) || Boolean(m.admin && chatAdminUid && m.uid === chatAdminUid);
+const senderKey = (id, m) => (isOwnMsg(id, m) ? "me" : m.admin ? "admin" : `${m.name}|${m.device}|${m.country}`);
 
 const renderMessage = (id, m, { first, last }) => {
-  const own = mine.has(id);
+  const own = isOwnMsg(id, m);
   const date = m.createdAt?.toDate?.();
-  const name = m.name || "Anonymous";
+  const name = m.admin ? (m.name || profileNameNow()) : (m.name || "Anonymous");
 
   const item = el("li", "msg");
   if (own) item.classList.add("is-mine");
@@ -203,9 +210,19 @@ const renderMessage = (id, m, { first, last }) => {
   if (!firstLoad && !rendered.has(id)) item.classList.add("is-new");
 
   // Avatar (others only), shown on the last message of a group
+  if (m.admin) item.classList.add("is-admin");
   if (!own) {
-    const avatar = el("span", "msg-avatar", [...name][0].toUpperCase());
-    avatar.style.setProperty("--h", hueFor(name));
+    let avatar;
+    if (m.admin) {
+      avatar = el("span", "msg-avatar is-photo");
+      const img = el("img");
+      img.src = profilePhoto();
+      img.alt = "";
+      avatar.append(img);
+    } else {
+      avatar = el("span", "msg-avatar", [...name][0].toUpperCase());
+      avatar.style.setProperty("--h", hueFor(name));
+    }
     avatar.setAttribute("aria-hidden", "true");
     item.append(avatar);
   }
@@ -215,6 +232,7 @@ const renderMessage = (id, m, { first, last }) => {
   if (first && !own) {
     const meta = el("div", "msg-meta");
     meta.append(el("span", "msg-name", name));
+    if (m.admin) meta.append(el("span", "msg-admin-badge", "Admin"));
     if (m.device) meta.append(el("span", "msg-origin", m.device));
     if (m.country) {
       // Windows can't draw flag emoji, so show the country code there instead
@@ -324,9 +342,10 @@ onSnapshot(
   (snap) => {
     const stick = firstLoad || nearBottom();
     const docs = snap.docs.slice().reverse();
+    lastMessageDocs = docs;
 
     if (!firstLoad && !isOpen()) {
-      for (const d of docs) if (!rendered.has(d.id) && !mine.has(d.id)) unread++;
+      for (const d of docs) if (!rendered.has(d.id) && !isOwnMsg(d.id, d.data())) unread++;
       setBadge();
     }
 
@@ -523,15 +542,26 @@ form.addEventListener("submit", async (e) => {
 
   sendBtn.disabled = true;
   try {
-    const [device, country] = await Promise.all([detectDevice(), detectCountry()]);
-    const ref = await addDoc(messagesRef, {
-      name,
-      text,
-      device: device.slice(0, 40),
-      country: country.code,
-      countryName: country.name,
-      createdAt: serverTimestamp(),
-    });
+    let ref;
+    if (chatAdminUid) {
+      ref = await addDoc(messagesRef, {
+        name: profileNameNow().slice(0, 60),
+        text,
+        admin: true,
+        uid: chatAdminUid,
+        createdAt: serverTimestamp(),
+      });
+    } else {
+      const [device, country] = await Promise.all([detectDevice(), detectCountry()]);
+      ref = await addDoc(messagesRef, {
+        name,
+        text,
+        device: device.slice(0, 40),
+        country: country.code,
+        countryName: country.name,
+        createdAt: serverTimestamp(),
+      });
+    }
     mine.add(ref.id);
     store.set("chat-mine", [...mine].slice(-200));
     lastSent = Date.now();
@@ -550,6 +580,28 @@ form.addEventListener("submit", async (e) => {
     updateComposer();
     textInput.focus();
   }
+});
+
+/* ---------- Admin in the chat ---------- */
+const adminNote = el("p", "chat-admin-note");
+adminNote.hidden = true;
+form.prepend(adminNote);
+
+onAuthStateChanged(getAuth(app), async (u) => {
+  chatAdminUid = null;
+  if (u && !u.isAnonymous) {
+    try { if ((await getDoc(doc(db, "admins", u.uid))).exists()) chatAdminUid = u.uid; } catch { /* not an admin */ }
+  }
+  form.classList.toggle("is-admin", Boolean(chatAdminUid));
+  adminNote.hidden = !chatAdminUid;
+  if (chatAdminUid) {
+    adminNote.replaceChildren(
+      el("span", "", "Sending as "),
+      el("strong", "", profileNameNow()),
+      el("span", "msg-admin-badge", "Admin")
+    );
+  }
+  if (lastMessageDocs.length) renderList(lastMessageDocs);
 });
 
 /* ---------- Open / close ---------- */

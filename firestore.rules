@@ -17,8 +17,23 @@ service cloud.firestore {
     }
 
     // Public chat: anyone can read and post; only admins can delete; nobody can edit.
+    // Admins can also post as their profile (admin: true), which nobody else can.
     match /messages/{messageId} {
       allow read: if true;
+
+      allow create: if
+        isAdmin() &&
+        request.resource.data.keys().hasOnly(['name', 'text', 'admin', 'uid', 'createdAt']) &&
+        request.resource.data.keys().hasAll(['name', 'text', 'admin', 'uid', 'createdAt']) &&
+        request.resource.data.admin == true &&
+        request.resource.data.uid == request.auth.uid &&
+        request.resource.data.text is string &&
+        request.resource.data.text.size() > 0 &&
+        request.resource.data.text.size() <= 500 &&
+        request.resource.data.name is string &&
+        request.resource.data.name.size() > 0 &&
+        request.resource.data.name.size() <= 60 &&
+        request.resource.data.createdAt == request.time;
 
       allow create: if
         request.resource.data.keys().hasOnly(['name', 'text', 'device', 'country', 'countryName', 'createdAt']) &&
