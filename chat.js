@@ -7,15 +7,17 @@ const statusBox = document.getElementById("chatStatus");
 
 let initializeApp, getAnalytics, isSupported;
 let getFirestore, collection, addDoc, query, orderBy, limit, onSnapshot, serverTimestamp, getCountFromServer, where;
-let doc, getDoc, setDoc, updateDoc, getDocs, startAfter, deleteDoc;
+let doc, getDoc, setDoc, updateDoc, getDocs, startAfter, deleteDoc, writeBatch;
 let getAuth, signInAnonymously, onAuthStateChanged;
+let GoogleAuthProvider, linkWithPopup, linkWithRedirect, signInWithPopup, signInWithRedirect, signInWithCredential, getRedirectResult;
 try {
   ({ initializeApp } = await import(`${SDK}/firebase-app.js`));
   ({ getAnalytics, isSupported } = await import(`${SDK}/firebase-analytics.js`));
   ({ getFirestore, collection, addDoc, query, orderBy, limit, onSnapshot, serverTimestamp, getCountFromServer, where,
-     doc, getDoc, setDoc, updateDoc, getDocs, startAfter, deleteDoc } =
+     doc, getDoc, setDoc, updateDoc, getDocs, startAfter, deleteDoc, writeBatch } =
     await import(`${SDK}/firebase-firestore.js`));
-  ({ getAuth, signInAnonymously, onAuthStateChanged } = await import(`${SDK}/firebase-auth.js`));
+  ({ getAuth, signInAnonymously, onAuthStateChanged, GoogleAuthProvider, linkWithPopup, linkWithRedirect,
+     signInWithPopup, signInWithRedirect, signInWithCredential, getRedirectResult } = await import(`${SDK}/firebase-auth.js`));
 } catch (err) {
   console.error(err);
   if (statusBox) { statusBox.textContent = "Couldn't load the chat. Check your connection."; statusBox.hidden = false; }
@@ -47,7 +49,6 @@ const profileNameNow = () => document.getElementById("name")?.textContent.trim()
 const HISTORY = 100;          // messages loaded
 const MAX_TEXT = 500;
 const MAX_NAME = 24;
-const COOLDOWN_MS = 3000;     // between sends
 
 /* ---------- Elements ---------- */
 const fab = document.getElementById("chatToggle") || document.createElement("button");   // removed from the page
@@ -196,10 +197,15 @@ const stampLabel = (date) => {
 };
 
 
-const isOwnMsg = (id, m) => mine.has(id) || Boolean(m.admin && chatAdminUid && m.uid === chatAdminUid);
+const isOwnMsg = (id, m) => {
+  if (mine.has(id)) return true;
+  if (m.admin) return Boolean(chatAdminUid && m.uid === chatAdminUid);
+  const me = getAuth(app).currentUser;
+  return Boolean(m.uid && me && m.uid === me.uid);
+};
 const senderKey = (id, m) => (isOwnMsg(id, m) ? "me" : m.admin ? "admin" : `${m.name}|${m.device}|${m.country}`);
 
-const renderMessage = (id, m, { first, last, own = isOwnMsg(id, m), rx = null }) => {
+const renderMessage = (id, m, { first, last, own = isOwnMsg(id, m), rx = null, status = "" }) => {
   const date = m.createdAt?.toDate?.();
   const name = m.admin ? (m.name || profileNameNow()) : (m.name || "Anonymous");
 
@@ -247,8 +253,26 @@ const renderMessage = (id, m, { first, last, own = isOwnMsg(id, m), rx = null })
   if (date) text.title = date.toLocaleString() + (m.countryName ? ` · ${m.countryName}` : "");
   body.append(text);
 
+  if (status) {
+    item.classList.add(status === "failed" ? "is-failed" : "is-pending");
+    const line = el("div", "msg-status");
+    if (status === "failed") {
+      line.append(el("span", "msg-status-text", "Not sent"));
+      const retry = el("button", "msg-status-btn", "Retry");
+      retry.type = "button";
+      retry.dataset.retry = id;
+      const remove = el("button", "msg-status-btn", "Remove");
+      remove.type = "button";
+      remove.dataset.discard = id;
+      line.append(retry, remove);
+    } else {
+      line.append(el("span", "msg-status-text", "Sending…"));
+    }
+    body.append(line);
+  }
+
   item.append(body);
-  if (rx) rx.decorate(item, body, id);   // reaction badges + react button
+  if (rx && !status) rx.decorate(item, body, id);   // reaction badges + react button
   return item;
 };
 
@@ -278,7 +302,11 @@ const renderList = (docs, target = list, ownOf = isOwnMsg, rx = chatRx) => {
         od.toDateString() === day;
     };
 
-    frag.append(renderMessage(d.id, m, { first: !sameAs(prev), last: !sameAs(next), own: ownOf(d.id, m), rx }));
+    // Not confirmed by Firebase yet (or failed): show it as sending / not sent
+    const status = d.outbox
+      ? (d.outbox.status === "failed" ? "failed" : "sending")
+      : (d.metadata && d.metadata.hasPendingWrites ? "sending" : "");
+    frag.append(renderMessage(d.id, m, { first: !sameAs(prev), last: !sameAs(next), own: ownOf(d.id, m), rx, status }));
   });
 
   target.replaceChildren(frag);
@@ -329,6 +357,7 @@ const fabFloat = document.getElementById("chatFab");
 const fabBadge = document.getElementById("chatFabBadge");
 
 const setBadge = () => {
+  if (window.Notify) window.Notify.setCount(dmUnread);
   const total = unread + dmUnread;
   const label = total > 9 ? "9+" : String(total);
   badge.hidden = total === 0;
@@ -341,6 +370,7 @@ const setBadge = () => {
 
 onSnapshot(
   query(messagesRef, orderBy("createdAt", "desc"), limit(HISTORY)),
+  { includeMetadataChanges: true },
   (snap) => {
     const stick = firstLoad || nearBottom();
     const docs = snap.docs.slice().reverse();
@@ -351,12 +381,11 @@ onSnapshot(
       setBadge();
     }
 
-    renderList(docs);
+    if (!navigator.onLine) setStatus("You're offline. Messages will send when you're back online.");
+    else setStatus("");
+    drawCommunity();
     renderRecentMessages(docs);
     for (const d of docs) rendered.add(d.id);
-
-    if (!docs.length) list.append(el("li", "chat-empty", "No messages yet. Say hi! 👋"));
-    setStatus("");
     firstLoad = false;
     if (stick) scrollToBottom();
   },
@@ -609,15 +638,14 @@ const updateComposer = () => {
 textInput.addEventListener("input", updateComposer);
 updateComposer();
 
-/* ---------- Sending ---------- */
-let lastSent = 0;
-
+/* ---------- Sending (instant; see outbox.js) ---------- */
 const autoGrow = () => {
   textInput.style.height = "auto";
   textInput.style.height = `${Math.min(textInput.scrollHeight, 120)}px`;
 };
 textInput.addEventListener("input", autoGrow);
 
+// Enter sends, Shift + Enter makes a new line
 textInput.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
     e.preventDefault();
@@ -625,66 +653,132 @@ textInput.addEventListener("keydown", (e) => {
   }
 });
 
-form.addEventListener("submit", async (e) => {
+// A quiet anonymous sign-in: the server's spam limit is per sender
+const chatAuth = getAuth(app);
+const ensureSender = async () => {
+  if (chatAuth.authStateReady) await chatAuth.authStateReady();
+  return chatAuth.currentUser || (await signInAnonymously(chatAuth)).user;
+};
+
+// Device + country for the message, without holding it up for long
+const senderInfo = async () => {
+  const later = new Promise((r) => setTimeout(() => r({ code: "", name: "" }), 1500));
+  const [device, country] = await Promise.all([detectDevice(), Promise.race([detectCountry(), later])]);
+  return { device: device.slice(0, 40), country: country.code || "", countryName: country.name || "" };
+};
+
+// A refused write whose message is already saved (an earlier try got through) counts as sent
+const alreadySaved = async (ref, err) => {
+  if (!err || err.code !== "permission-denied") return false;
+  try { return (await getDoc(ref)).exists(); } catch { return false; }
+};
+
+const failNote = (err) => (err && err.code === "permission-denied"
+  ? "A message wasn't sent: it was refused (sending too fast, or the Firestore rules aren't published). Tap Retry."
+  : "A message wasn't sent. Check your connection and tap Retry.");
+
+// Server messages + the ones still on their way (shown at the end, in order)
+// Messages in the order they were sent (confirmed, sending and failed ones together)
+const sentAt = (d) => {
+  if (d.outbox) return d.outbox.at;
+  const t = d.data({ serverTimestamps: "estimate" }).createdAt;
+  return (t && t.toMillis && t.toMillis()) || (t && t.toDate && t.toDate().getTime()) || 0;
+};
+const withOutbox = (docs, box, toData) => {
+  if (!box) return docs;
+  const ids = new Set(docs.map((d) => d.id));
+  const extra = box.list().filter((m) => !ids.has(m.id)).map((m) => ({ id: m.id, outbox: m, data: () => toData(m) }));
+  return extra.length ? [...docs, ...extra].sort((x, y) => sentAt(x) - sentAt(y)) : docs;
+};
+
+const drawCommunity = () => {
+  const docs = withOutbox(lastMessageDocs, chatOutbox, (m) => ({
+    name: m.meta.name || "",
+    text: m.text,
+    createdAt: { toDate: () => new Date(m.at) },
+    ...(chatAdminUid ? { admin: true, uid: chatAdminUid } : {}),
+  }));
+  renderList(docs);
+  if (!docs.length) list.append(el("li", "chat-empty", "No messages yet. Say hi! 👋"));
+  if (!firstLoad) for (const d of docs) rendered.add(d.id);
+  const failed = chatOutbox && chatOutbox.list().find((m) => m.status === "failed");
+  if (failed && chatMode === "public") setStatus(failNote(failed.error));
+};
+
+const chatOutbox = window.createOutbox ? window.createOutbox({
+  key: "community",
+  maxLength: MAX_TEXT,
+  newId: () => doc(messagesRef).id,
+  onChange: () => {
+    const stick = nearBottom();
+    drawCommunity();
+    if (stick) scrollToBottom();
+  },
+  write: async (id, text, meta) => {
+    const ref = doc(messagesRef, id);
+    try {
+      const u = await ensureSender();
+      const owner = Boolean(chatAdminUid && u.uid === chatAdminUid);
+      const batch = writeBatch(db);
+      if (owner) {
+        batch.set(ref, { name: profileNameNow().slice(0, 60), text, admin: true, uid: u.uid, createdAt: serverTimestamp() });
+      } else {
+        batch.set(ref, { name: meta.name || "", text, uid: u.uid, ...(await senderInfo()), createdAt: serverTimestamp() });
+        batch.set(doc(db, "throttle", u.uid), { at: serverTimestamp() });   // server-side spam limit
+      }
+      await batch.commit();
+    } catch (err) {
+      if (await alreadySaved(ref, err)) return;
+      throw err;
+    }
+  },
+}) : null;
+
+// One protected path for Enter, the send button and the 💚 button
+form.addEventListener("submit", (e) => {
   e.preventDefault();
-  const text = textInput.value.replace(/\s+\n/g, "\n").trim().slice(0, MAX_TEXT);
-  if (!text) return;
-
-  const wait = COOLDOWN_MS - (Date.now() - lastSent);
-  if (wait > 0) {
-    setStatus(`Slow down a little — wait ${Math.ceil(wait / 1000)}s.`);
-    return;
-  }
-
   const name = nameInput.value.trim().slice(0, MAX_NAME);
   store.set("chat-name", name);
 
-  if (chatMode === "private" && !chatAdminUid) {
-    await sendPrivate(text, name);
+  const priv = chatMode === "private" && !chatAdminUid;
+  const box = priv ? dmOutbox : chatOutbox;
+  if (!box) {
+    setStatus("Couldn't load the chat. Please refresh the page.");
     return;
   }
-
-  sendBtn.disabled = true;
-  try {
-    let ref;
-    if (chatAdminUid) {
-      ref = await addDoc(messagesRef, {
-        name: profileNameNow().slice(0, 60),
-        text,
-        admin: true,
-        uid: chatAdminUid,
-        createdAt: serverTimestamp(),
-      });
-    } else {
-      const [device, country] = await Promise.all([detectDevice(), detectCountry()]);
-      ref = await addDoc(messagesRef, {
-        name,
-        text,
-        device: device.slice(0, 40),
-        country: country.code,
-        countryName: country.name,
-        createdAt: serverTimestamp(),
-      });
-    }
-    mine.add(ref.id);
-    store.set("chat-mine", [...mine].slice(-200));
-    lastSent = Date.now();
-    textInput.value = "";
-    autoGrow();
-    updateComposer();
-    closePicker();
-    setStatus("");
-    scrollToBottom();
-  } catch (err) {
-    console.error(err);
-    setStatus(err.code === "permission-denied"
-      ? "Couldn't send: the chat isn't set up yet (Firestore rules)."
-      : "Couldn't send. Please try again.");
-  } finally {
-    updateComposer();
-    textInput.focus();
+  const res = box.send(textInput.value, { name });
+  if (!res.ok) {
+    const why = window.outboxRefusal(res);
+    if (why) setStatus(why);
+    return;   // keep what they typed
   }
+  if (res.id && !priv) {
+    mine.add(res.id);
+    store.set("chat-mine", [...mine].slice(-200));
+  }
+
+  // Clear right away: the message is already in the conversation
+  textInput.value = "";
+  autoGrow();
+  updateComposer();
+  closePicker();
+  setStatus(navigator.onLine ? "" : "You're offline. Your message will send when you're back online.");
+  if (priv) dmList.scrollTop = dmList.scrollHeight;
+  else scrollToBottom();
 });
+
+// Retry / Remove on a message that wasn't sent
+list.addEventListener("click", (e) => {
+  const retry = e.target.closest("[data-retry]");
+  const remove = e.target.closest("[data-discard]");
+  if (!chatOutbox || (!retry && !remove)) return;
+  if (retry) chatOutbox.retry(retry.dataset.retry);
+  else chatOutbox.discard(remove.dataset.discard);
+  setStatus("");
+});
+
+window.addEventListener("offline", () => setStatus("You're offline. Messages will send when you're back online."));
+window.addEventListener("online", () => setStatus(""));
 
 /* ---------- Admin in the chat ---------- */
 const adminNote = el("p", "chat-admin-note");
@@ -704,7 +798,7 @@ onAuthStateChanged(getAuth(app), async (u) => {
       el("strong", "", profileNameNow())
     );
   }
-  if (lastMessageDocs.length) renderList(lastMessageDocs);
+  drawCommunity();
   // Signed in as the admin: private chats are answered from the dashboard
   const modes = document.getElementById("chatModes");
   if (modes) modes.hidden = Boolean(chatAdminUid);
@@ -798,6 +892,9 @@ let dmDocs = [];
 let dmUid = null;
 let dmUnsub = null;
 let dmLoaded = false;
+let dmOutbox = null;   // private messages on their way (set up below)
+const dmKnown = new Set();   // messages already seen by this page (to spot new ones)
+let dmPrimed = false;
 
 const dmTime = (d) => {
   const t = d.data({ serverTimestamps: "estimate" }).createdAt;
@@ -807,18 +904,26 @@ const firstName = () => profileNameNow().split(/\s+/)[0] || "the owner";
 
 const renderDm = () => {
   for (const n of document.querySelectorAll("[data-first-name]")) n.textContent = firstName();
-  if (!dmDocs.length) {
+  const all = withOutbox(dmDocs, dmOutbox, (m) => ({
+    from: "visitor",
+    text: m.text,
+    createdAt: { toDate: () => new Date(m.at) },
+  }));
+  if (!all.length) {
     const empty = el("li", "chat-empty dm-empty");
     empty.append(
       el("strong", "", `Message ${firstName()} privately`),
       el("span", "", "Only the two of you can read this conversation. 🔒")
     );
     dmList.replaceChildren(empty);
+    renderKeep();
     return;
   }
   // Same bubbles as the public chat: the owner's replies show their photo
-  const docs = dmDocs.map((d) => ({
+  const docs = all.map((d) => ({
     id: d.id,
+    outbox: d.outbox,
+    metadata: d.metadata,
     data: (opts) => {
       const v = d.data(opts);
       const admin = v.from === "admin";
@@ -826,7 +931,8 @@ const renderDm = () => {
     },
   }));
   renderList(docs, dmList, (id, m) => !m.admin, dmRx);
-  for (const d of dmDocs) rendered.add(d.id);
+  for (const d of all) rendered.add(d.id);
+  renderKeep();
 };
 
 const markDmSeen = () => {
@@ -848,6 +954,8 @@ const watchDm = (uid) => {
   if (dmUid === uid) return;
   if (dmUnsub) dmUnsub();
   dmUnsub = null;
+  dmKnown.clear();
+  dmPrimed = false;
   dmUid = uid;
   dmDocs = [];
   dmLoaded = false;
@@ -858,14 +966,20 @@ const watchDm = (uid) => {
   if (!uid) return;
   dmUnsub = onSnapshot(
     query(collection(db, "dms", uid, "messages"), orderBy("createdAt", "asc"), limit(300)),
+    { includeMetadataChanges: true },
     (snap) => {
       const stick = !dmLoaded || dmList.scrollHeight - dmList.scrollTop - dmList.clientHeight < 80;
+      // New replies from the owner since the page loaded
+      const fresh = dmPrimed ? snap.docs.filter((d) => !dmKnown.has(d.id) && d.data().from === "admin") : [];
+      for (const d of snap.docs) dmKnown.add(d.id);
+      dmPrimed = true;
       dmDocs = snap.docs;
       dmLoaded = true;
       renderDm();
-      if (isOpen() && chatMode === "private") markDmSeen();
+      if (isOpen() && chatMode === "private" && document.visibilityState === "visible") markDmSeen();
       else countDmUnread();
       if (stick) dmList.scrollTop = dmList.scrollHeight;
+      if (fresh.length) alertDm(fresh[fresh.length - 1].data().text);
     },
     (err) => {
       console.warn("Private messages not loaded:", err.code || err);
@@ -876,8 +990,52 @@ const watchDm = (uid) => {
   );
 };
 
+// A new private reply: sound, tab title count, system notification (in the background)
+// and a notice on the page. Nothing if you're already reading the private chat.
+const alertDm = (text) => {
+  const reading = isOpen() && chatMode === "private" && window.Notify && window.Notify.isWatching();
+  if (reading) return;
+  if (window.Notify) {
+    window.Notify.ping();
+    window.Notify.system({
+      title: `${firstName()} replied privately`,
+      body: text,
+      tag: "private-reply",
+      onClick: () => { if (!isOpen()) open(); setMode("private"); },
+    });
+  }
+  if (document.visibilityState === "visible" && window.showToast) window.showToast(`💬 ${firstName()} sent you a private message`);
+};
+
+// "Notify me" asks the browser once; hidden when already allowed, blocked or unsupported
+const dmNotifyBtn = document.getElementById("dmNotify");
+const syncNotifyBtn = () => {
+  if (!dmNotifyBtn) return;
+  dmNotifyBtn.hidden = !window.Notify || window.Notify.permission() !== "default";
+};
+if (dmNotifyBtn) {
+  dmNotifyBtn.addEventListener("click", async () => {
+    const result = window.Notify ? await window.Notify.ask() : "unsupported";
+    syncNotifyBtn();
+    if (window.showToast) {
+      window.showToast(result === "granted"
+        ? "🔔 You'll be notified when you get a reply"
+        : "Notifications are off. You can allow them in your browser settings.");
+    }
+  });
+}
+syncNotifyBtn();
+
 // Only visitors (anonymous sign-in) have a private chat here; the admin uses the dashboard
-onAuthStateChanged(dmAuth, (u) => watchDm(u && u.isAnonymous ? u.uid : null));
+onAuthStateChanged(dmAuth, async (u) => {
+  if (u && !u.isAnonymous) {
+    let owner = false;
+    try { owner = (await getDoc(doc(db, "admins", u.uid))).exists(); } catch { owner = false; }
+    if (owner) { watchDm(null); renderKeep(); return; }
+  }
+  watchDm(u ? u.uid : null);
+  renderKeep();
+});
 
 const setMode = (mode) => {
   chatMode = mode === "private" ? "private" : "public";
@@ -890,6 +1048,7 @@ const setMode = (mode) => {
   list.hidden = priv;
   dmList.hidden = !priv;
   dmNote.hidden = !priv;
+  renderKeep();
   panel.classList.toggle("is-private", priv);
   if (chatSub) chatSub.textContent = priv ? `Private · only you and ${firstName()}` : "Community Chat · Active now";
   textInput.placeholder = priv ? `Message ${firstName()} privately…` : "Aa";
@@ -905,51 +1064,166 @@ const setMode = (mode) => {
   }
 };
 
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && isOpen() && chatMode === "private") markDmSeen();
+});
+
 for (const b of modeBtns) b.addEventListener("click", () => {
   setMode(b.dataset.chatMode);
   if (window.matchMedia("(hover: hover)").matches) textInput.focus();
 });
 
-const sendPrivate = async (text, name) => {
-  sendBtn.disabled = true;
-  try {
+dmOutbox = window.createOutbox ? window.createOutbox({
+  key: "private",
+  maxLength: MAX_DM,
+  newId: () => doc(collection(db, "dms")).id,
+  onChange: () => {
+    renderDm();
+    dmList.scrollTop = dmList.scrollHeight;
+    const failed = dmOutbox.list().find((m) => m.status === "failed");
+    if (failed && chatMode === "private") setStatus(failNote(failed.error));
+  },
+  write: async (id, text, meta) => {
+    if (dmAuth.authStateReady) await dmAuth.authStateReady();
     let u = dmAuth.currentUser;
-    if (u && !u.isAnonymous) {
-      setStatus("You're signed in as the admin. Reply to private messages from the dashboard.");
-      return;
+    if (u && chatAdminUid && u.uid === chatAdminUid) {
+      const err = new Error("Signed in as the admin");
+      err.code = "admin-sender";
+      throw err;
     }
     if (!u) u = (await signInAnonymously(dmAuth)).user;
     watchDm(u.uid);
-
-    const [device, country] = await Promise.all([detectDevice(), detectCountry()]);
     const threadRef = doc(db, "dms", u.uid);
-    await addDoc(collection(threadRef, "messages"), { from: "visitor", text: text.slice(0, MAX_DM), createdAt: serverTimestamp() });
-    await setDoc(threadRef, {
-      name: name || "Anonymous",
-      device: device.slice(0, 40),
-      country: country.code,
-      countryName: country.name,
-      lastText: text.slice(0, 120),
-      lastFrom: "visitor",
-      updatedAt: serverTimestamp(),
-    }, { merge: true });
+    const ref = doc(threadRef, "messages", id);
+    try {
+      const info = await senderInfo();
+      const batch = writeBatch(db);
+      batch.set(ref, { from: "visitor", text, createdAt: serverTimestamp() });
+      batch.set(threadRef, {
+        name: meta.name || "Anonymous",
+        ...info,
+        lastText: text.slice(0, 120),
+        lastFrom: "visitor",
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+      batch.set(doc(db, "throttle", u.uid), { at: serverTimestamp() });   // server-side spam limit
+      await batch.commit();
+    } catch (err) {
+      if (await alreadySaved(ref, err)) return;
+      throw err;
+    }
+  },
+}) : null;
 
-    lastSent = Date.now();
-    textInput.value = "";
-    autoGrow();
-    closePicker();
-    setStatus("");
-    dmList.scrollTop = dmList.scrollHeight;
-  } catch (err) {
-    console.error(err);
-    setStatus(err.code === "permission-denied"
-      ? "Couldn't send: private messages aren't set up yet (Firestore rules)."
-      : explainComment(err, "send your message"));
-  } finally {
-    updateComposer();
-    textInput.focus();
+/* ---------- Keep the private chat after clearing the browser ---------- */
+// The chat belongs to the visitor's sign-in. An anonymous sign-in is lost when the browser
+// data is cleared, so the visitor can link it to their Google account: same identity, same
+// conversation, on any browser. Signing in with Google later brings it back.
+function renderKeep() {
+  const bar = document.getElementById("dmKeep");
+  if (!bar) return;
+  const text = document.getElementById("dmKeepText");
+  const btn = document.getElementById("dmKeepBtn");
+  const label = document.getElementById("dmKeepLabel");
+  const u = getAuth(app).currentUser;
+  const google = Boolean(u && (u.providerData || []).some((p) => p.providerId === "google.com"));
+  const hasChat = dmDocs.length > 0;
+  if (google) {
+    text.textContent = `Saved to your Google account${u.email ? ` (${u.email})` : ""}. Sign in with Google on any browser to see it again.`;
+    btn.hidden = true;
+  } else if (hasChat) {
+    text.textContent = "Clearing your browser removes this chat. Keep it with your Google account.";
+    label.textContent = "Keep with Google";
+    btn.hidden = false;
+  } else {
+    text.textContent = "Talked before? Sign in with Google to bring back your conversation.";
+    label.textContent = "Restore with Google";
+    btn.hidden = false;
   }
+  bar.classList.toggle("is-saved", google);
+  bar.hidden = chatMode !== "private" || Boolean(chatAdminUid);
+}
+
+const googleProvider = () => {
+  const p = new GoogleAuthProvider();
+  p.setCustomParameters({ prompt: "select_account" });
+  return p;
 };
+
+// This Google account already keeps an earlier conversation: switch to it
+const useExistingGoogle = async (err) => {
+  const cred = GoogleAuthProvider.credentialFromError(err);
+  if (!cred) throw err;
+  await signInWithCredential(dmAuth, cred);
+};
+
+const googleError = (err) => {
+  const code = (err && err.code) || "";
+  if (code === "auth/operation-not-allowed") return "Google sign-in isn't turned on yet (Firebase → Authentication → Sign-in method).";
+  if (code === "auth/unauthorized-domain") return `Add "${location.hostname}" in Firebase → Authentication → Settings → Authorized domains.`;
+  return "Couldn't sign in with Google. Please try again.";
+};
+
+const keepBtn = document.getElementById("dmKeepBtn");
+if (keepBtn) {
+  keepBtn.addEventListener("click", async () => {
+    keepBtn.disabled = true;
+    try {
+      if (dmAuth.authStateReady) await dmAuth.authStateReady();
+      const u = dmAuth.currentUser;
+      try {
+        if (u && u.isAnonymous) await linkWithPopup(u, googleProvider());   // keeps the same identity
+        else await signInWithPopup(dmAuth, googleProvider());
+      } catch (err) {
+        if (err.code === "auth/credential-already-in-use" || err.code === "auth/email-already-in-use") {
+          await useExistingGoogle(err);
+        } else if (err.code === "auth/popup-blocked" || err.code === "auth/operation-not-supported-in-this-environment") {
+          // Phones that block pop-ups: go to Google and come back
+          if (u && u.isAnonymous) await linkWithRedirect(u, googleProvider());
+          else await signInWithRedirect(dmAuth, googleProvider());
+          return;
+        } else {
+          throw err;
+        }
+      }
+      const me = dmAuth.currentUser;
+      if (me && me.reload) await me.reload();
+      const display = dmAuth.currentUser && dmAuth.currentUser.displayName;
+      if (display && !nameInput.value.trim()) {
+        nameInput.value = display.split(/\s+/)[0].slice(0, MAX_NAME);
+        store.set("chat-name", nameInput.value);
+      }
+      setStatus("");
+      if (window.showToast) window.showToast("🔒 Your private chat is saved to your Google account");
+    } catch (err) {
+      console.error(err);
+      if (err.code !== "auth/popup-closed-by-user" && err.code !== "auth/cancelled-popup-request") setStatus(googleError(err));
+    } finally {
+      keepBtn.disabled = false;
+      renderKeep();
+    }
+  });
+}
+
+// Back from Google after a redirect
+getRedirectResult(dmAuth)
+  .then(() => renderKeep())
+  .catch((err) => {
+    if (err.code === "auth/credential-already-in-use" || err.code === "auth/email-already-in-use") {
+      useExistingGoogle(err).catch((e) => setStatus(googleError(e)));
+    } else if (err.code && err.code !== "auth/no-auth-event") {
+      setStatus(googleError(err));
+    }
+  });
+
+dmList.addEventListener("click", (e) => {
+  const retry = e.target.closest("[data-retry]");
+  const remove = e.target.closest("[data-discard]");
+  if (!dmOutbox || (!retry && !remove)) return;
+  if (retry) dmOutbox.retry(retry.dataset.retry);
+  else dmOutbox.discard(remove.dataset.discard);
+  setStatus("");
+});
 
 renderDm();
 if (store.get("chat-mode", "public") === "private") setMode("private");

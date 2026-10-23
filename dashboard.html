@@ -266,6 +266,13 @@
           <div class="card dm-card" id="dmCard">
             <aside class="dm-threads" aria-label="Conversations">
               <div class="dm-threads-head"><strong>Conversations</strong><span class="muted" id="dmThreadCount"></span></div>
+              <div class="dm-notify-bar" id="dmNotifyBar" hidden>
+                <span>Get notified about new private messages while the dashboard is open.</span>
+                <button class="btn btn-outline btn-sm" type="button" id="dmNotify">
+                  <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" /><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" /></svg>
+                  Turn on
+                </button>
+              </div>
               <ul class="dm-thread-list" id="dmThreadList"><li class="empty pad">Loading…</li></ul>
             </aside>
 
@@ -437,6 +444,8 @@
   </dialog>
 
   <script src="firebase-config.js"></script>
+  <script src="outbox.js" defer></script>
+  <script src="notify.js" defer></script>
   <script src="reactions.js" defer></script>
   <script src="dashboard.js" defer></script>
 </body>

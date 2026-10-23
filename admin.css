@@ -1748,3 +1748,50 @@ button.chip:hover { background: var(--accent); border-color: var(--ring); }
 
 @media (max-width: 1100px) { .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .confirm .btn-spinner { border-color: rgba(255, 255, 255, 0.45); border-top-color: #fff; }
+
+/* New-message notices */
+.toast[data-kind="msg"]::before { content: "💬"; }
+
+.dm-notify-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 8px 0;
+  padding: 10px 12px;
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--muted-foreground);
+  background: var(--muted);
+  border-radius: calc(var(--radius) - 4px);
+}
+
+.dm-notify-bar span { flex: 1; }
+.dm-notify-bar .btn { flex: none; }
+
+/* Message status: sending / not sent */
+.t-msg.is-pending .t-text { opacity: 0.7; }
+.t-msg.is-failed .t-text { box-shadow: inset 0 0 0 1.5px var(--destructive); }
+
+.t-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 4px;
+  font-size: 11.5px;
+  color: var(--muted-foreground);
+}
+
+.t-msg.is-failed .t-status-text { font-weight: 600; color: var(--destructive); }
+
+.t-status-btn {
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  color: var(--primary);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.t-status-btn:hover { text-decoration: underline; text-underline-offset: 2px; }
+.t-status-btn:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: 4px; }

@@ -16,6 +16,24 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Anti-spam: the time of each sender's last message. A visitor's message must be saved
+    // together with this stamp (one batch), at least half a second after their previous one,
+    // so scripts can't flood the chat. Nobody can read it.
+    function throttled() {
+      return getAfter(/databases/$(database)/documents/throttle/$(request.auth.uid)).data.at == request.time &&
+        (!exists(/databases/$(database)/documents/throttle/$(request.auth.uid)) ||
+          request.time > get(/databases/$(database)/documents/throttle/$(request.auth.uid)).data.at + duration.value(500, 'ms'));
+    }
+
+    match /throttle/{uid} {
+      allow read: if false;
+      allow create, update: if
+        request.auth != null &&
+        request.auth.uid == uid &&
+        request.resource.data.keys().hasOnly(['at']) &&
+        request.resource.data.at == request.time;
+    }
+
     // Public chat: anyone can read and post; only admins can delete; nobody can edit.
     // Admins can also post as their profile (admin: true), which nobody else can.
     match /messages/{messageId} {
@@ -35,9 +53,13 @@ service cloud.firestore {
         request.resource.data.name.size() <= 60 &&
         request.resource.data.createdAt == request.time;
 
+      // Visitors post with their (anonymous) sign-in, within the spam limit
       allow create: if
-        request.resource.data.keys().hasOnly(['name', 'text', 'device', 'country', 'countryName', 'createdAt']) &&
-        request.resource.data.keys().hasAll(['name', 'text', 'device', 'country', 'countryName', 'createdAt']) &&
+        request.auth != null &&
+        request.resource.data.keys().hasOnly(['name', 'text', 'uid', 'device', 'country', 'countryName', 'createdAt']) &&
+        request.resource.data.keys().hasAll(['name', 'text', 'uid', 'device', 'country', 'countryName', 'createdAt']) &&
+        request.resource.data.uid == request.auth.uid &&
+        throttled() &&
         request.resource.data.text is string &&
         request.resource.data.text.size() > 0 &&
         request.resource.data.text.size() <= 500 &&
@@ -310,7 +332,7 @@ service cloud.firestore {
           request.resource.data.text.size() > 0 &&
           request.resource.data.text.size() <= 1000 &&
           request.resource.data.createdAt == request.time &&
-          ((request.auth.uid == threadId && request.resource.data.from == 'visitor') ||
+          ((request.auth.uid == threadId && request.resource.data.from == 'visitor' && throttled()) ||
             (isAdmin() && request.resource.data.from == 'admin'));
 
         allow update: if false;

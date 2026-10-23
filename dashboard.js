@@ -24,7 +24,7 @@ const auth = A.getAuth();
 const db = F.getFirestore();
 const {
   collection, doc, getDoc, setDoc, addDoc, deleteDoc, query, orderBy, limit, startAfter,
-  getDocs, onSnapshot, serverTimestamp, getCountFromServer, where, updateDoc,
+  getDocs, onSnapshot, serverTimestamp, getCountFromServer, where, updateDoc, writeBatch,
 } = F;
 
 /* ---------- Helpers ---------- */
@@ -365,6 +365,43 @@ const miniInto = async (name, id) => {
 };
 
 /* ---------- Messages: live chat ---------- */
+/* ---------- Sending helpers (outbox.js) ---------- */
+// A refused write whose message is already saved (an earlier try got through) counts as sent
+const alreadySaved = async (ref, err) => {
+  if (!err || err.code !== "permission-denied") return false;
+  try { return (await getDoc(ref)).exists(); } catch { return false; }
+};
+const failNote = (err) => (err && err.code === "permission-denied"
+  ? "A message wasn't sent: Firebase refused it. Check the Firestore rules, then tap Retry."
+  : "A message wasn't sent. Check your connection and tap Retry.");
+
+// "Sending…" or "Not sent · Retry · Remove" under a message
+const statusLine = (id, status) => {
+  const line = el("div", "t-status");
+  if (status === "failed") {
+    line.append(el("span", "t-status-text", "Not sent"));
+    const retry = el("button", "t-status-btn", "Retry");
+    retry.type = "button";
+    retry.dataset.retry = id;
+    const remove = el("button", "t-status-btn", "Remove");
+    remove.type = "button";
+    remove.dataset.discard = id;
+    line.append(retry, remove);
+  } else {
+    line.append(el("span", "t-status-text", "Sending…"));
+  }
+  return line;
+};
+// Messages in the order they were sent (confirmed, sending and failed ones together)
+const sentAt = (d) => {
+  if (d.outbox) return d.outbox.at;
+  const t = d.data({ serverTimestamps: "estimate" }).createdAt;
+  return (t && t.toMillis && t.toMillis()) || (t && t.toDate && t.toDate().getTime()) || 0;
+};
+const statusOf = (d) => (d.outbox
+  ? (d.outbox.status === "failed" ? "failed" : "sending")
+  : (d.metadata && d.metadata.hasPendingWrites ? "sending" : ""));
+
 /* ---------- Message reactions (shared with the public page: reactions.js) ---------- */
 const rxFs = { collection, doc, query, limit, onSnapshot, setDoc, deleteDoc, serverTimestamp };
 const rxMe = () => ({ uid: user.uid, name: profileName, admin: true });
@@ -392,6 +429,7 @@ const chat = (() => {
   let started = false;
   let seen = null;   // ids seen while the tab was open
   let chatRx = null;
+  let outbox = null;
 
   const nearBottom = () => scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight < 80;
   const scrollToEnd = () => requestAnimationFrame(() => { scrollEl.scrollTop = scrollEl.scrollHeight; });
@@ -409,6 +447,15 @@ const chat = (() => {
   const render = () => {
     const live1 = new Set(live.map((d) => d.id));
     const docs = [...older.filter((d) => !live1.has(d.id)).slice().reverse(), ...live.slice().reverse()];
+    // Your messages still on their way
+    if (outbox) {
+      const ids = new Set(docs.map((d) => d.id));
+      for (const m of outbox.list()) {
+        if (ids.has(m.id)) continue;
+        docs.push({ id: m.id, ref: null, outbox: m, data: () => ({ name: profileName, text: m.text, admin: true, uid: user.uid, createdAt: { toDate: () => new Date(m.at) } }) });
+      }
+      docs.sort((x, y) => sentAt(x) - sentAt(y));
+    }
     if (!docs.length) {
       thread.replaceChildren(el("li", "empty center", "No messages yet."));
       moreBtn.hidden = true;
@@ -446,18 +493,25 @@ const chat = (() => {
       const row = el("div", "t-bubble-row");
       const text = el("p", "t-text", m.text);
       text.title = fullDate(date);
-      row.append(text, deleteButton({
-        iconOnly: true,
-        className: "t-del",
-        title: "Delete message?",
-        message: `“${snippet(m.text)}” from ${m.admin ? "you" : (m.name || "Anonymous")} will be removed from the Community Chat for everyone.`,
-        note: "This can't be undone.",
-        done: "Message deleted",
-        onConfirm: async () => { await deleteDoc(d.ref); },
-      }));
+      const status = statusOf(d);
+      if (status) {
+        li.classList.add(status === "failed" ? "is-failed" : "is-pending");
+        row.append(text);
+      } else {
+        row.append(text, deleteButton({
+          iconOnly: true,
+          className: "t-del",
+          title: "Delete message?",
+          message: `“${snippet(m.text)}” from ${m.admin ? "you" : (m.name || "Anonymous")} will be removed from the Community Chat for everyone.`,
+          note: "This can't be undone.",
+          done: "Message deleted",
+          onConfirm: async () => { await deleteDoc(d.ref); },
+        }));
+      }
       body.append(row);
+      if (status) body.append(statusLine(d.id, status));
       li.append(body);
-      if (chatRx) chatRx.decorate(li, body, d.id);
+      if (chatRx && !status) chatRx.decorate(li, body, d.id);
       items.push(li);
       prev = { date, key: key(m) };
     });
@@ -475,6 +529,7 @@ const chat = (() => {
     if (chatRx) chatRx.start();
     onSnapshot(
       query(ref, orderBy("createdAt", "desc"), limit(PAGE)),
+      { includeMetadataChanges: true },
       (snap) => {
         const stick = nearBottom() || !live.length;
         live = snap.docs;
@@ -526,23 +581,51 @@ const chat = (() => {
     if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); form.requestSubmit(); }
   });
 
-  form.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const text = input.value.replace(/\s+\n/g, "\n").trim().slice(0, 500);
-    if (!text) return;
-    send.disabled = true;
-    try {
-      await addDoc(ref, { name: profileName.slice(0, 60), text, admin: true, uid: user.uid, createdAt: serverTimestamp() });
-      input.value = "";
-      setMessage(msg, "");
+  // Sending: instant, in order, retryable (outbox.js)
+  outbox = window.createOutbox ? window.createOutbox({
+    key: "admin-community",
+    maxLength: 500,
+    newId: () => doc(ref).id,
+    onChange: () => {
+      render();
       scrollToEnd();
-    } catch (err) {
-      console.error(err);
-      setMessage(msg, errText(err, "send"));
-    } finally {
-      grow();
-      input.focus();
+      const failed = outbox.list().find((m) => m.status === "failed");
+      if (failed) setMessage(msg, failNote(failed.error));
+    },
+    write: async (id, text) => {
+      const mref = doc(ref, id);
+      try {
+        await setDoc(mref, { name: profileName.slice(0, 60), text, admin: true, uid: user.uid, createdAt: serverTimestamp() });
+      } catch (err) {
+        if (await alreadySaved(mref, err)) return;
+        throw err;
+      }
+    },
+  }) : null;
+
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    if (!outbox) return;
+    const res = outbox.send(input.value);
+    if (!res.ok) {
+      const why = window.outboxRefusal(res);
+      if (why) setMessage(msg, why);
+      return;   // keep what you typed
     }
+    input.value = "";
+    grow();
+    setMessage(msg, navigator.onLine ? "" : "You're offline. Your message will send when you're back online.");
+    scrollToEnd();
+    input.focus();
+  });
+
+  thread.addEventListener("click", (e) => {
+    const retry = e.target.closest("[data-retry]");
+    const remove = e.target.closest("[data-discard]");
+    if (!outbox || (!retry && !remove)) return;
+    if (retry) outbox.retry(retry.dataset.retry);
+    else outbox.discard(remove.dataset.discard);
+    setMessage(msg, "");
   });
 
   return {
@@ -577,6 +660,35 @@ const inbox = (() => {
   let unsubMsgs = null;
   let started = false;
   let dmRx = null;
+  let lastMsgDocs = [];
+  let outbox = null;
+  const lastAlert = new Map();   // conversation id -> time of the last message we alerted about
+  let primed = false;
+
+  // A visitor wrote: sound, tab title count, system notification (in the background), notice
+  const alertAdmin = (id, v) => {
+    const who = v.name || "Anonymous";
+    if (window.Notify) {
+      window.Notify.ping();
+      window.Notify.system({
+        title: `New private message from ${who}`,
+        body: v.lastText || "",
+        tag: `dm-${id}`,
+        onClick: () => { location.hash = "#inbox"; open(id); },
+      });
+    }
+    if (document.visibilityState === "visible") toast(`New private message from ${who}`, "msg");
+  };
+
+  // "Turn on" notifications (asked once, only when the browser hasn't decided yet)
+  const notifyBar = document.getElementById("dmNotifyBar");
+  const syncNotify = () => { notifyBar.hidden = !window.Notify || window.Notify.permission() !== "default"; };
+  document.getElementById("dmNotify").addEventListener("click", async () => {
+    const result = window.Notify ? await window.Notify.ask() : "unsupported";
+    syncNotify();
+    toast(result === "granted" ? "Notifications are on" : "Notifications are off in this browser", result === "granted" ? "ok" : "error");
+  });
+  syncNotify();
 
   const ms = (t) => t?.toDate?.()?.getTime?.() || 0;
   const isUnread = (v) => v.lastFrom === "visitor" && ms(v.updatedAt) > ms(v.adminReadAt);
@@ -599,6 +711,7 @@ const inbox = (() => {
     const unread = threads.filter((d) => isUnread(d.data())).length;
     navBadge.hidden = !unread;
     navBadge.textContent = unread > 9 ? "9+" : String(unread);
+    if (window.Notify) window.Notify.setCount(unread);
     countEl.textContent = threads.length ? `${threads.length}${unread ? ` · ${unread} unread` : ""}` : "";
 
     if (!threads.length) {
@@ -624,7 +737,13 @@ const inbox = (() => {
     }));
   };
 
-  const renderMessages = (docs, v) => {
+  const renderMessages = (serverDocs, v) => {
+    // Your replies still on their way (for this conversation)
+    const ids = new Set(serverDocs.map((d) => d.id));
+    const docs = [...serverDocs, ...(outbox ? outbox.list() : [])
+      .filter((m) => m.meta.thread === openId && !ids.has(m.id))
+      .map((m) => ({ id: m.id, outbox: m, data: () => ({ from: "admin", text: m.text, createdAt: { toDate: () => new Date(m.at) } }) }))]
+      .sort((x, y) => sentAt(x) - sentAt(y));
     if (!docs.length) {
       threadEl.replaceChildren(el("li", "empty center", "No messages in this conversation."));
       return;
@@ -659,8 +778,13 @@ const inbox = (() => {
       text.title = fullDate(date);
       row.append(text);
       body.append(row);
+      const status = statusOf(d);
+      if (status) {
+        li.classList.add(status === "failed" ? "is-failed" : "is-pending");
+        body.append(statusLine(d.id, status));
+      }
       li.append(body);
-      if (dmRx) dmRx.decorate(li, body, d.id);
+      if (dmRx && !status) dmRx.decorate(li, body, d.id);
       items.push(li);
       prev = { date, from: m.from };
     });
@@ -690,6 +814,7 @@ const inbox = (() => {
     const t = threads.find((d) => d.id === id);
     if (!t) return;
     if (unsubMsgs) unsubMsgs();
+    lastMsgDocs = [];
     if (dmRx) dmRx.stop();
     dmRx = makeRx(["dms", id, "reactions"], (err) => setMessage(msg, errText(err, "react")));
     if (dmRx) dmRx.start();
@@ -719,8 +844,10 @@ const inbox = (() => {
     }));
     unsubMsgs = onSnapshot(
       query(collection(db, "dms", id, "messages"), orderBy("createdAt", "asc"), limit(300)),
+      { includeMetadataChanges: true },
       (snap) => {
         const cur = threads.find((d) => d.id === id);
+        lastMsgDocs = snap.docs;
         renderMessages(snap.docs, (cur || t).data());
         scrollToEnd();
         if (onTab()) markRead(id);
@@ -739,6 +866,18 @@ const inbox = (() => {
       query(collection(db, "dms"), orderBy("updatedAt", "desc"), limit(100)),
       (snap) => {
         threads = snap.docs;
+        // Alert for conversations with a new visitor message since the dashboard loaded
+        for (const d of threads) {
+          const v = d.data();
+          const t = ms(v.updatedAt);
+          const prev = lastAlert.get(d.id);
+          lastAlert.set(d.id, t);
+          if (!primed || v.lastFrom !== "visitor" || !t) continue;
+          if (prev !== undefined && t <= prev) continue;
+          const reading = openId === d.id && onTab() && window.Notify && window.Notify.isWatching();
+          if (!reading) alertAdmin(d.id, v);
+        }
+        primed = true;
         if (openId) {
           const cur = threads.find((d) => d.id === openId);
           if (!cur) close();
@@ -765,30 +904,63 @@ const inbox = (() => {
     if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); form.requestSubmit(); }
   });
 
-  form.addEventListener("submit", async (e) => {
+  // Sending: instant, in order, retryable (outbox.js)
+  outbox = window.createOutbox ? window.createOutbox({
+    key: "admin-private",
+    maxLength: 1000,
+    newId: () => doc(collection(db, "dms")).id,
+    onChange: () => {
+      if (openId) {
+        const cur = threads.find((d) => d.id === openId);
+        if (cur) renderMessages(lastMsgDocs, cur.data());
+        scrollToEnd();
+      }
+      const failed = outbox.list().find((m) => m.status === "failed" && m.meta.thread === openId);
+      if (failed) setMessage(msg, failNote(failed.error));
+    },
+    write: async (id, text, meta) => {
+      const threadRef = doc(db, "dms", meta.thread);
+      const mref = doc(threadRef, "messages", id);
+      try {
+        const batch = writeBatch(db);
+        batch.set(mref, { from: "admin", text, createdAt: serverTimestamp() });
+        batch.update(threadRef, {
+          lastText: text.slice(0, 120),
+          lastFrom: "admin",
+          updatedAt: serverTimestamp(),
+          adminReadAt: serverTimestamp(),
+        });
+        await batch.commit();
+      } catch (err) {
+        if (await alreadySaved(mref, err)) return;
+        throw err;
+      }
+    },
+  }) : null;
+
+  form.addEventListener("submit", (e) => {
     e.preventDefault();
-    const text = input.value.replace(/\s+\n/g, "\n").trim().slice(0, 1000);
-    if (!text || !openId) return;
-    const id = openId;
-    send.disabled = true;
-    try {
-      await addDoc(collection(db, "dms", id, "messages"), { from: "admin", text, createdAt: serverTimestamp() });
-      await updateDoc(doc(db, "dms", id), {
-        lastText: text.slice(0, 120),
-        lastFrom: "admin",
-        updatedAt: serverTimestamp(),
-        adminReadAt: serverTimestamp(),
-      });
-      input.value = "";
-      setMessage(msg, "");
-      scrollToEnd();
-    } catch (err) {
-      console.error(err);
-      setMessage(msg, errText(err, "send"));
-    } finally {
-      grow();
-      input.focus();
+    if (!outbox || !openId) return;
+    const res = outbox.send(input.value, { thread: openId });
+    if (!res.ok) {
+      const why = window.outboxRefusal(res);
+      if (why) setMessage(msg, why);
+      return;   // keep what you typed
     }
+    input.value = "";
+    grow();
+    setMessage(msg, navigator.onLine ? "" : "You're offline. Your reply will send when you're back online.");
+    scrollToEnd();
+    input.focus();
+  });
+
+  threadEl.addEventListener("click", (e) => {
+    const retry = e.target.closest("[data-retry]");
+    const remove = e.target.closest("[data-discard]");
+    if (!outbox || (!retry && !remove)) return;
+    if (retry) outbox.retry(retry.dataset.retry);
+    else outbox.discard(remove.dataset.discard);
+    setMessage(msg, "");
   });
 
   return { start, markOpenRead: () => { if (openId) markRead(openId); } };
