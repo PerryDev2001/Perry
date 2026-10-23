@@ -987,11 +987,12 @@ const isNotAVisitor = () =>
 //  1. the key this browser already used
 //  2. a visit with the same device fingerprint (same phone, new browser / private tab / new IP)
 //  3. a one-way code of the IP, or a random key if the IP lookup failed (a new visitor)
-// A first visit creates the document; later visits only refresh "lastSeen" (at most once a day).
+// A first visit creates the document (the count goes up by one). Every later visit from the
+// same device only moves its "last visit" time; it is never counted again.
+const VISIT_REFRESH_MS = 5 * 60 * 1000;   // refresh "last visit" at most every 5 minutes
 const recordVisit = async () => {
   if (isNotAVisitor()) return;
-  const today = new Date().toDateString();
-  if (store.get("visit-day", "") === today) return;
+  if (Date.now() - store.get("visit-last", 0) < VISIT_REFRESH_MS) return;
   try {
     const [device, country] = await Promise.all([detectDevice(), detectCountry()]);
     const fp = await deviceFingerprint(device);
@@ -1028,7 +1029,7 @@ const recordVisit = async () => {
     }
 
     store.set("visit-key", key);
-    store.set("visit-day", today);
+    store.set("visit-last", Date.now());
     myVisits.add(key);
     store.set("visit-mine", [...myVisits].slice(-30));
   } catch (err) {
