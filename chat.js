@@ -232,7 +232,6 @@ const renderMessage = (id, m, { first, last }) => {
   if (first && !own) {
     const meta = el("div", "msg-meta");
     meta.append(el("span", "msg-name", name));
-    if (m.admin) meta.append(el("span", "msg-admin-badge", "Admin"));
     if (m.device) meta.append(el("span", "msg-origin", m.device));
     if (m.country) {
       // Windows can't draw flag emoji, so show the country code there instead
@@ -597,8 +596,7 @@ onAuthStateChanged(getAuth(app), async (u) => {
   if (chatAdminUid) {
     adminNote.replaceChildren(
       el("span", "", "Sending as "),
-      el("strong", "", profileNameNow()),
-      el("span", "msg-admin-badge", "Admin")
+      el("strong", "", profileNameNow())
     );
   }
   if (lastMessageDocs.length) renderList(lastMessageDocs);
