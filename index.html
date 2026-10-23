@@ -29,26 +29,6 @@
 
       <!-- Actions dock -->
       <div class="top-actions dock viewers">
-        <button class="tool-btn viewers-btn" type="button" id="viewersToggle" data-tip="Visitors" aria-label="See who viewed this page" aria-expanded="false" aria-controls="viewersPanel">
-          <span class="viewers-eye" aria-hidden="true">
-            <svg class="icon" viewBox="0 0 24 24">
-              <path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z" />
-              <circle cx="12" cy="12" r="3" />
-            </svg>
-          </span>
-          <span class="viewers-count is-loading" id="viewersCount">–</span>
-          <span class="viewers-label" id="viewersLabel">visitors</span>
-        </button>
-
-        <span class="dock-divider" aria-hidden="true"></span>
-
-        <button class="tool-btn round-btn" type="button" id="chatToggle" data-tip="Chat" aria-label="Open chat" aria-expanded="false" aria-controls="chatPanel">
-          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
-            <path d="M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v8a2.5 2.5 0 0 1-2.5 2.5H11l-4.5 3.5V17A2.5 2.5 0 0 1 4 14.5v-8Z" /><circle cx="8.5" cy="10.5" r="1.1" fill="currentColor" stroke="none" /><circle cx="12" cy="10.5" r="1.1" fill="currentColor" stroke="none" /><circle cx="15.5" cy="10.5" r="1.1" fill="currentColor" stroke="none" />
-          </svg>
-          <span class="chat-badge" id="chatBadge" hidden>0</span>
-        </button>
-
         <button class="tool-btn round-btn theme-toggle" type="button" id="themeToggle" data-tip="Theme" aria-label="Switch to dark theme">
           <svg class="icon icon-moon" viewBox="0 0 24 24" aria-hidden="true">
             <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" />
@@ -61,22 +41,6 @@
       </div>
     </div>
   </header>
-
-  <!-- Visitors dropdown -->
-  <div class="viewers">
-    <section class="viewers-panel" id="viewersPanel" role="dialog" aria-labelledby="viewersTitle" hidden>
-      <header class="viewers-head">
-        <div class="viewers-title-row">
-          <h2 class="viewers-title" id="viewersTitle">Visitors</h2>
-          <a class="viewers-all" href="visitors.html">See all</a>
-        </div>
-        <p class="viewers-sub" id="viewersTotal">Loading…</p>
-      </header>
-      <ol class="viewers-list" id="viewersList">
-        <li class="viewers-empty">Loading…</li>
-      </ol>
-    </section>
-  </div>
 
   <!-- ---------- Profile ---------- -->
   <main class="profile" id="top">
@@ -102,13 +66,6 @@
             </svg>
             Public Chat
           </button>
-          <a class="btn btn-secondary" href="visitors.html">
-            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z" />
-              <circle cx="12" cy="12" r="3" />
-            </svg>
-            Visitors
-          </a>
         </div>
       </div>
 

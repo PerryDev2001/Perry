@@ -2736,3 +2736,205 @@ html.theme-switching * {
 
 /* Admins don't type a name: their profile is used */
 .chat-form.is-admin .chat-name-row { display: none; }
+
+/* ==========================================================================
+   Post dialog (comments + "liked by")
+   ========================================================================== */
+html.has-post-dialog,
+html.has-post-dialog body { overflow: hidden; }
+
+.post-dialog {
+  position: fixed;
+  inset: 0;
+  z-index: 9998;   /* over the page and chat, under the cursor (9999) and toasts */
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(2, 20, 14, 0.42);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  opacity: 0;
+  transition: opacity 0.22s ease;
+}
+
+.post-dialog[hidden] { display: none; }
+.post-dialog.is-open { opacity: 1; }
+
+.post-dialog-panel {
+  position: relative;
+  width: min(560px, 100%);
+  max-height: min(720px, calc(100dvh - 32px));
+  display: flex;
+  flex-direction: column;
+  background: var(--card-solid);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-pop);
+  transform: translateY(14px) scale(0.98);
+  transition: transform 0.32s var(--ease-out);
+}
+
+.post-dialog.is-open .post-dialog-panel { transform: none; }
+
+.post-dialog-close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  z-index: 2;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  color: var(--muted);
+  background: var(--btn);
+  border: 0;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.post-dialog-close:hover { color: var(--fg); background: var(--btn-hover); }
+.post-dialog-close:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.post-dialog-close .icon { width: 16px; height: 16px; }
+
+.post-dialog-body {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 20px 20px 0;
+  border-radius: inherit;
+}
+
+/* The comment section inside the dialog */
+.post-dialog .comments {
+  margin: 0;
+  padding: 0;
+  border-top: 0;
+}
+
+.post-dialog .comments-head { padding-right: 44px; min-height: 34px; }
+
+.post-dialog .comment-form {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  margin: 14px -20px 0;
+  padding: 14px 20px 18px;
+  background: var(--card-solid);
+  border-top: 1px solid var(--divider);
+}
+
+.post-dialog .comment-status { margin: 0 0 14px; }
+.post-dialog .likers { padding-bottom: 18px; }
+
+/* "Liked by" list */
+.liker-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.liker {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border-top: 1px solid var(--divider);
+}
+
+.liker:first-child { border-top: 0; }
+
+.liker-icon {
+  position: relative;
+  flex: none;
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  color: var(--accent-text);
+  background: var(--accent-soft);
+  border-radius: 50%;
+}
+
+.liker-icon > .icon { width: 18px; height: 18px; }
+
+.liker-heart {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 17px;
+  height: 17px;
+  display: grid;
+  place-items: center;
+  color: var(--on-accent);
+  background: var(--grad);
+  border: 2px solid var(--card-solid);
+  border-radius: 50%;
+}
+
+.liker-heart .icon { width: 8px; height: 8px; }
+
+.liker-name {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.liker-time { flex: none; font-size: 12px; color: var(--muted); }
+
+/* Like count is a button that opens the list */
+.post-likes.is-clickable {
+  cursor: pointer;
+  border-radius: 6px;
+  transition: color 0.2s ease;
+}
+
+.post-likes.is-clickable:hover { color: var(--accent-text); text-decoration: underline; text-underline-offset: 3px; }
+.post-likes.is-clickable:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+/* Phones: the dialog slides up from the bottom */
+@media (max-width: 600px) {
+  .post-dialog {
+    place-items: end stretch;
+    padding: 0;
+  }
+
+  .post-dialog-panel {
+    width: 100%;
+    max-height: 86dvh;
+    border-radius: var(--radius) var(--radius) 0 0;
+    border-bottom: 0;
+    transform: translateY(40px);
+  }
+
+  .post-dialog-panel::before {
+    content: "";
+    position: absolute;
+    top: 7px;
+    left: 50%;
+    width: 38px;
+    height: 4px;
+    margin-left: -19px;
+    background: var(--divider);
+    border-radius: 999px;
+  }
+
+  .post-dialog-body { padding: 22px 16px 0; }
+  .post-dialog .comment-form {
+    margin: 12px -16px 0;
+    padding: 12px 16px calc(14px + env(safe-area-inset-bottom));
+  }
+  .post-dialog .likers { padding-bottom: calc(16px + env(safe-area-inset-bottom)); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .post-dialog,
+  .post-dialog-panel { transition: none; }
+}

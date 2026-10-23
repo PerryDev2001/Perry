@@ -50,7 +50,7 @@ const MAX_NAME = 24;
 const COOLDOWN_MS = 3000;     // between sends
 
 /* ---------- Elements ---------- */
-const fab = document.getElementById("chatToggle");
+const fab = document.getElementById("chatToggle") || document.createElement("button");   // removed from the page
 const panel = document.getElementById("chatPanel");
 const closeBtn = document.getElementById("chatClose");
 const list = document.getElementById("chatList");
@@ -59,7 +59,7 @@ const form = document.getElementById("chatForm");
 const nameInput = document.getElementById("chatName");
 const textInput = document.getElementById("chatText");
 const sendBtn = document.getElementById("chatSend");
-const badge = document.getElementById("chatBadge");
+const badge = document.getElementById("chatBadge") || document.createElement("span");   // removed from the page
 
 /* ---------- Small storage helpers ---------- */
 const store = {
@@ -649,12 +649,12 @@ document.addEventListener("keydown", (e) => {
 const visitsRef = collection(db, "visits");
 const VISITS_PAGE = 20;            // visitors per page
 
-const vBtn = document.getElementById("viewersToggle");
-const vPanel = document.getElementById("viewersPanel");
-const vList = document.getElementById("viewersList");
-const vTotal = document.getElementById("viewersTotal");
-const vCount = document.getElementById("viewersCount");
-const vLabel = document.getElementById("viewersLabel");
+const vBtn = document.getElementById("viewersToggle") || document.createElement("button");   // removed from the page
+const vPanel = document.getElementById("viewersPanel") || document.createElement("section");   // removed from the page
+const vList = document.getElementById("viewersList") || document.createElement("ol");   // removed from the page
+const vTotal = document.getElementById("viewersTotal") || document.createElement("span");   // removed from the page
+const vCount = document.getElementById("viewersCount") || document.createElement("span");   // removed from the page
+const vLabel = document.getElementById("viewersLabel") || document.createElement("span");   // removed from the page
 
 const myVisits = new Set(store.get("visit-mine", []));
 let totalViews = null;
@@ -1067,6 +1067,65 @@ const buildCommentSection = (postId) => {
   return { section, badge, more, list, form, me, nameInput: nameInput2, text, chars, send, status };
 };
 
+/* ---------- Post dialog: comments and "liked by" open in a pop-up ---------- */
+// One shared dialog. Clicking outside it (which covers the post's buttons), the X, or Escape closes it.
+const postDialog = (() => {
+  const root = el("div", "post-dialog");
+  root.hidden = true;
+  const panel = el("div", "post-dialog-panel");
+  panel.setAttribute("role", "dialog");
+  panel.setAttribute("aria-modal", "true");
+  const closeBtn = el("button", "post-dialog-close");
+  closeBtn.type = "button";
+  closeBtn.setAttribute("aria-label", "Close");
+  closeBtn.append(commentIcon('<path d="M18 6 6 18M6 6l12 12"/>'));
+  const body = el("div", "post-dialog-body");
+  panel.append(closeBtn, body);
+  root.append(panel);
+  document.body.append(root);
+
+  let current = null;   // { key, onClose }
+  let returnFocus = null;
+  let downOutside = false;
+
+  const hide = () => {
+    if (!current) return;
+    const c = current;
+    current = null;
+    root.classList.remove("is-open");
+    document.documentElement.classList.remove("has-post-dialog");
+    setTimeout(() => { if (!current) { root.hidden = true; body.replaceChildren(); } }, 240);
+    c.onClose?.();
+    if (returnFocus && document.contains(returnFocus)) returnFocus.focus({ preventScroll: true });
+  };
+
+  const show = ({ key, label, content, onClose }) => {
+    if (current) { const c = current; current = null; c.onClose?.(); }
+    else returnFocus = document.activeElement;
+    current = { key, onClose };
+    panel.setAttribute("aria-label", label);
+    body.replaceChildren(content);
+    body.scrollTop = 0;
+    root.hidden = false;
+    document.documentElement.classList.add("has-post-dialog");
+    void root.offsetWidth;   // let the opening transition run
+    root.classList.add("is-open");
+  };
+
+  // Only a press that starts and ends outside the panel closes it (dragging out of a textarea doesn't)
+  root.addEventListener("pointerdown", (e) => { downOutside = !panel.contains(e.target); });
+  root.addEventListener("click", (e) => {
+    if (downOutside && !panel.contains(e.target)) hide();
+    downOutside = false;
+  });
+  closeBtn.addEventListener("click", hide);
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && current) { e.preventDefault(); hide(); }
+  });
+
+  return { show, hide, body, is: (key) => Boolean(current && current.key === key) };
+})();
+
 const createThread = (postId) => {
   const ui = buildCommentSection(postId);
   let docs = [];
@@ -1356,24 +1415,28 @@ const createThread = (postId) => {
     render,
     syncName: (n) => { ui.nameInput.value = n; showMe(); },
     open: (focus) => {
+      const mark = (on) => {
+        for (const b of document.querySelectorAll(`[data-comment-btn="${CSS.escape(postId)}"]`)) {
+          b.setAttribute("aria-expanded", String(on));
+          b.classList.toggle("is-active", on);
+        }
+      };
       ui.section.hidden = false;
-      requestAnimationFrame(() => ui.section.classList.add("is-open"));
-      for (const b of document.querySelectorAll(`[data-comment-btn="${CSS.escape(postId)}"]`)) {
-        b.setAttribute("aria-expanded", "true");
-        b.classList.add("is-active");
-      }
-      if (focus) ui.text.focus({ preventScroll: true });
-      ui.section.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      ui.section.classList.add("is-open");
+      postDialog.show({
+        key: `comments:${postId}`,
+        label: "Comments",
+        content: ui.section,
+        onClose: () => { mark(false); editingId = null; confirmingId = null; setStatus2(""); },
+      });
+      mark(true);
+      render();
+      // Newest comments are at the bottom, next to the comment box
+      postDialog.body.scrollTop = postDialog.body.scrollHeight;
+      if (focus && !matchMedia("(pointer: coarse)").matches) ui.text.focus({ preventScroll: true });
     },
-    close: () => {
-      ui.section.classList.remove("is-open");
-      ui.section.hidden = true;
-      for (const b of document.querySelectorAll(`[data-comment-btn="${CSS.escape(postId)}"]`)) {
-        b.setAttribute("aria-expanded", "false");
-        b.classList.remove("is-active");
-      }
-    },
-    isOpen: () => !ui.section.hidden,
+    close: () => { if (postDialog.is(`comments:${postId}`)) postDialog.hide(); },
+    isOpen: () => postDialog.is(`comments:${postId}`),
   };
 };
 
@@ -1383,20 +1446,13 @@ const commentThread = (postId) => {
   return threads.get(postId);
 };
 
-// Comment button opens the thread; the "N comments" link toggles it
+// The Comment button and the "N comments" link open the thread in the dialog (or close it if open)
 document.addEventListener("click", (e) => {
-  const open = e.target.closest("[data-comment-btn]");
-  if (open) {
-    const t = commentThread(open.dataset.commentBtn);
-    if (t.isOpen()) t.section.querySelector(".comment-text")?.focus();
-    else t.open(true);
-    return;
-  }
-  const count = e.target.closest("[data-comment-count]");
-  if (count) {
-    const t = commentThread(count.dataset.commentCount);
-    if (t.isOpen()) t.close(); else t.open(false);
-  }
+  const btn = e.target.closest("[data-comment-btn], [data-comment-count]");
+  if (!btn || btn.closest(".post-dialog")) return;
+  const t = commentThread(btn.dataset.commentBtn || btn.dataset.commentCount);
+  if (t.isOpen()) t.close();
+  else t.open(btn.hasAttribute("data-comment-btn"));
 });
 
 // Signed in? (anonymous for visitors, email for admins)
@@ -1414,11 +1470,9 @@ if (nameInput) nameInput.addEventListener("change", () => {
   for (const t of threads.values()) t.syncName(nameInput.value.trim());
 });
 
-// Pinned post thread (its section sits in index.html)
-{
-  const holder = document.querySelector('[data-comments-slot="pinned"]');
-  if (holder) holder.replaceWith(commentThread("pinned").section);
-}
+// Pinned post thread (shown in the dialog, so its old in-page slot isn't needed)
+document.querySelector('[data-comments-slot="pinned"]')?.remove();
+commentThread("pinned").render();
 
 /* ---------- Likes: one per device, saved in Firestore ---------- */
 // Each browser gets an invisible anonymous sign-in (no account). A like is the document
@@ -1446,7 +1500,17 @@ const renderLikes = (postId) => {
   for (const stats of document.querySelectorAll(`[data-like-stats="${CSS.escape(postId)}"]`)) {
     stats.replaceChildren();
     stats.removeAttribute("title");
-    if (!count) continue;
+    stats.classList.toggle("is-clickable", count > 0);
+    if (!count) {
+      stats.removeAttribute("role");
+      stats.removeAttribute("tabindex");
+      stats.removeAttribute("aria-label");
+      continue;
+    }
+    // Anyone can open the list of who liked it
+    stats.setAttribute("role", "button");
+    stats.tabIndex = 0;
+    stats.setAttribute("aria-label", "See who liked this");
 
     const dot = el("span", "like-dot");
     dot.innerHTML = `<svg class="icon icon-fill" viewBox="0 0 24 24" aria-hidden="true"><path d="${HEART_PATH}"/></svg>`;   // fixed markup
@@ -1456,12 +1520,68 @@ const renderLikes = (postId) => {
       : `${count.toLocaleString()} ${count === 1 ? "like" : "likes"}`;
     stats.append(dot, text);
 
-    // Hover: which devices liked it
-    const devices = docs.map((d) => d.data().device || "Unknown device");
-    const shown = devices.slice(0, 12).join(", ");
-    stats.title = `Liked on: ${shown}${devices.length > 12 ? ` and ${devices.length - 12} more` : ""}`;
+    stats.title = "See who liked this";
   }
+
+  if (postDialog.is(`likes:${postId}`)) fillLikers(postId);
 };
+
+// "Liked by" list in the dialog
+const likers = (() => {
+  const wrap = el("section", "likers");
+  const head = el("div", "comments-head");
+  const title = el("h3", "comments-title", "Liked by");
+  const badge = el("span", "comments-badge", "0");
+  title.append(badge);
+  head.append(title);
+  const list = el("ul", "liker-list");
+  wrap.append(head, list);
+  return { wrap, badge, list };
+})();
+
+const fillLikers = (postId) => {
+  const st = likeState.get(postId);
+  const docs = (st ? st.docs : []).slice().sort((a, b) => {
+    const t = (d) => d.data({ serverTimestamps: "estimate" }).createdAt?.toDate?.()?.getTime?.() || 0;
+    return t(b) - t(a);   // newest first
+  });
+  likers.badge.textContent = docs.length.toLocaleString();
+  if (!docs.length) {
+    likers.list.replaceChildren(el("li", "comment-empty", "No likes yet."));
+    return;
+  }
+  likers.list.replaceChildren(...docs.map((d) => {
+    const v = d.data({ serverTimestamps: "estimate" });
+    const device = v.device || "Unknown device";
+    const date = v.createdAt?.toDate?.();
+    const li = el("li", "liker");
+    const icon = el("span", "liker-icon");
+    icon.append(commentIcon(DEVICE_ICONS[deviceKind(device)]));
+    const heart = el("span", "liker-heart");
+    heart.append(commentIcon(`<path d="${HEART_PATH}"/>`, "icon icon-fill"));
+    icon.append(heart);
+    const name = el("span", "liker-name", device);
+    if (likeUid && v.uid === likeUid) name.append(el("span", "viewer-you", "You"));
+    const when = el("time", "liker-time", relTime(date));
+    if (date) { when.dateTime = date.toISOString(); when.title = date.toLocaleString(); }
+    li.append(icon, name, when);
+    return li;
+  }));
+};
+
+const openLikers = (postId) => {
+  fillLikers(postId);
+  postDialog.show({ key: `likes:${postId}`, label: "Liked by", content: likers.wrap });
+};
+
+document.addEventListener("click", (e) => {
+  const s = e.target.closest("[data-like-stats].is-clickable");
+  if (s) openLikers(s.dataset.likeStats);
+});
+document.addEventListener("keydown", (e) => {
+  const s = e.target.closest?.("[data-like-stats].is-clickable");
+  if (s && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); openLikers(s.dataset.likeStats); }
+});
 
 // Start listening to a post's likes (once per post)
 const watchLikes = (postId) => {
@@ -1617,9 +1737,9 @@ const renderPost = (d) => {
   comment.append(" Comment");
   actions.append(like, comment);
 
-  // This post's comment thread (kept alive across re-renders of the feed)
+  // This post's comment thread (kept alive across re-renders; it opens in the dialog)
   const thread = commentThread(d.id);
-  article.append(stats, actions, thread.section);
+  article.append(stats, actions);
   queueMicrotask(() => { watchLikes(d.id); thread.render(); });
   return article;
 };
