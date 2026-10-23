@@ -1,4 +1,4 @@
-/* ---------- Public chat (Firebase Firestore) ---------- */
+/* ---------- Community Chat (Firebase Firestore) ---------- */
 // A classic script (not type="module") so it also runs when index.html is opened
 // straight from disk; Firebase itself is loaded with dynamic import() from Google's CDN.
 (async () => {
@@ -158,6 +158,7 @@ const el = (tag, className, text) => {
 const rendered = new Set();
 let firstLoad = true;
 let unread = 0;
+let dmUnread = 0;   // unread private replies from the owner
 
 const nearBottom = () => list.scrollHeight - list.scrollTop - list.clientHeight < 80;
 const scrollToBottom = () => { list.scrollTop = list.scrollHeight; };
@@ -198,8 +199,7 @@ const stampLabel = (date) => {
 const isOwnMsg = (id, m) => mine.has(id) || Boolean(m.admin && chatAdminUid && m.uid === chatAdminUid);
 const senderKey = (id, m) => (isOwnMsg(id, m) ? "me" : m.admin ? "admin" : `${m.name}|${m.device}|${m.country}`);
 
-const renderMessage = (id, m, { first, last }) => {
-  const own = isOwnMsg(id, m);
+const renderMessage = (id, m, { first, last, own = isOwnMsg(id, m), rx = null }) => {
   const date = m.createdAt?.toDate?.();
   const name = m.admin ? (m.name || profileNameNow()) : (m.name || "Anonymous");
 
@@ -248,12 +248,14 @@ const renderMessage = (id, m, { first, last }) => {
   body.append(text);
 
   item.append(body);
+  if (rx) rx.decorate(item, body, id);   // reaction badges + react button
   return item;
 };
 
-const renderList = (docs) => {
+const renderList = (docs, target = list, ownOf = isOwnMsg, rx = chatRx) => {
   const frag = document.createDocumentFragment();
   let prevDate = null;
+  const keyOf = (id, m) => (ownOf(id, m) ? "me" : m.admin ? "admin" : `${m.name}|${m.device}|${m.country}`);
 
   docs.forEach((d, i) => {
     const m = d.data({ serverTimestamps: "estimate" });
@@ -271,15 +273,15 @@ const renderList = (docs) => {
       if (!other) return false;
       const o = other.data({ serverTimestamps: "estimate" });
       const od = o.createdAt?.toDate?.() || new Date();
-      return senderKey(other.id, o) === senderKey(d.id, m) &&
+      return keyOf(other.id, o) === keyOf(d.id, m) &&
         Math.abs(od - date) < GROUP_GAP_MS &&
         od.toDateString() === day;
     };
 
-    frag.append(renderMessage(d.id, m, { first: !sameAs(prev), last: !sameAs(next) }));
+    frag.append(renderMessage(d.id, m, { first: !sameAs(prev), last: !sameAs(next), own: ownOf(d.id, m), rx }));
   });
 
-  list.replaceChildren(frag);
+  target.replaceChildren(frag);
 };
 
 // "Latest messages" card on the profile page
@@ -327,11 +329,12 @@ const fabFloat = document.getElementById("chatFab");
 const fabBadge = document.getElementById("chatFabBadge");
 
 const setBadge = () => {
-  const label = unread > 9 ? "9+" : String(unread);
-  badge.hidden = unread === 0;
+  const total = unread + dmUnread;
+  const label = total > 9 ? "9+" : String(total);
+  badge.hidden = total === 0;
   badge.textContent = label;
   if (fabBadge) {
-    fabBadge.hidden = unread === 0;
+    fabBadge.hidden = total === 0;
     fabBadge.textContent = label;
   }
 };
@@ -636,6 +639,11 @@ form.addEventListener("submit", async (e) => {
   const name = nameInput.value.trim().slice(0, MAX_NAME);
   store.set("chat-name", name);
 
+  if (chatMode === "private" && !chatAdminUid) {
+    await sendPrivate(text, name);
+    return;
+  }
+
   sendBtn.disabled = true;
   try {
     let ref;
@@ -697,6 +705,10 @@ onAuthStateChanged(getAuth(app), async (u) => {
     );
   }
   if (lastMessageDocs.length) renderList(lastMessageDocs);
+  // Signed in as the admin: private chats are answered from the dashboard
+  const modes = document.getElementById("chatModes");
+  if (modes) modes.hidden = Boolean(chatAdminUid);
+  if (chatAdminUid && chatMode === "private") setMode("public");
 });
 
 /* ---------- Open / close ---------- */
@@ -706,8 +718,10 @@ const open = () => {
   fab.setAttribute("aria-expanded", "true");
   fab.classList.add("is-active");
   unread = 0;
+  if (chatMode === "private") markDmSeen();
   setBadge();
-  scrollToBottom();
+  if (chatMode === "private") dmList.scrollTop = dmList.scrollHeight;
+  else scrollToBottom();
   if (window.matchMedia("(hover: hover)").matches) textInput.focus();
 };
 
@@ -726,7 +740,7 @@ document.addEventListener("pointerdown", (e) => {
   const t = e.target;
   if (panel.contains(t)) return;
   // The buttons that open the chat handle their own clicks
-  if (t.closest && t.closest("#chatToggle, #chatFab, [data-open-chat]")) return;
+  if (t.closest && t.closest("#chatToggle, #chatFab, [data-open-chat], .rx-pop")) return;
   close(false);
 });
 
@@ -742,6 +756,204 @@ document.addEventListener("keydown", (e) => {
   if (pickerOpen()) closePicker();
   else if (isOpen()) close();
 });
+/* ---------- Message reactions (reactions.js) ---------- */
+// Community Chat reactions are public; private-chat reactions live inside that private chat.
+const rxAuth = getAuth(app);
+const rxFs = { collection, doc, query, limit, onSnapshot, setDoc, deleteDoc, serverTimestamp };
+const rxMe = () => {
+  const u = rxAuth.currentUser;
+  if (!u) return null;
+  const owner = Boolean(chatAdminUid && u.uid === chatAdminUid);
+  return { uid: u.uid, admin: owner, name: owner ? profileNameNow() : (nameInput.value.trim() || "Anonymous") };
+};
+const rxEnsure = async () => {
+  if (rxAuth.authStateReady) await rxAuth.authStateReady();
+  if (!rxAuth.currentUser) await signInAnonymously(rxAuth);
+  return rxMe();
+};
+const rxError = (err) => setStatus(err && err.code === "permission-denied"
+  ? "Couldn't react: reactions aren't set up yet (Firestore rules)."
+  : explainComment(err, "react"));
+const makeRx = (path) => (window.createReactions
+  ? window.createReactions({ fs: rxFs, db, path, me: rxMe, ensureMe: rxEnsure, onError: rxError })
+  : null);
+const chatRx = makeRx(["chatReactions"]);
+if (chatRx) chatRx.start();
+let dmRx = null;
+onAuthStateChanged(rxAuth, () => { if (chatRx) chatRx.refresh(); if (dmRx) dmRx.refresh(); });
+
+/* ---------- Private chat with the owner ---------- */
+// One conversation per visitor in "dms/{their anonymous sign-in id}". firestore.rules let only
+// that visitor and admins read or write it, so nobody else can see these messages.
+const dmList = document.getElementById("dmList");
+const dmNote = document.getElementById("dmNote");
+const dmDot = document.getElementById("dmDot");
+const chatSub = document.querySelector(".chat-sub");
+const modeBtns = [...document.querySelectorAll("[data-chat-mode]")];
+const dmAuth = getAuth(app);
+const MAX_DM = 1000;
+
+let chatMode = "public";
+let dmDocs = [];
+let dmUid = null;
+let dmUnsub = null;
+let dmLoaded = false;
+
+const dmTime = (d) => {
+  const t = d.data({ serverTimestamps: "estimate" }).createdAt;
+  return t?.toMillis?.() ?? t?.toDate?.()?.getTime?.() ?? 0;
+};
+const firstName = () => profileNameNow().split(/\s+/)[0] || "the owner";
+
+const renderDm = () => {
+  for (const n of document.querySelectorAll("[data-first-name]")) n.textContent = firstName();
+  if (!dmDocs.length) {
+    const empty = el("li", "chat-empty dm-empty");
+    empty.append(
+      el("strong", "", `Message ${firstName()} privately`),
+      el("span", "", "Only the two of you can read this conversation. 🔒")
+    );
+    dmList.replaceChildren(empty);
+    return;
+  }
+  // Same bubbles as the public chat: the owner's replies show their photo
+  const docs = dmDocs.map((d) => ({
+    id: d.id,
+    data: (opts) => {
+      const v = d.data(opts);
+      const admin = v.from === "admin";
+      return { ...v, admin, name: admin ? profileNameNow() : (nameInput.value.trim() || "You") };
+    },
+  }));
+  renderList(docs, dmList, (id, m) => !m.admin, dmRx);
+  for (const d of dmDocs) rendered.add(d.id);
+};
+
+const markDmSeen = () => {
+  const latest = dmDocs.reduce((t, d) => Math.max(t, dmTime(d)), 0);
+  if (latest > store.get("dm-seen", 0)) store.set("dm-seen", latest);
+  dmUnread = 0;
+  dmDot.hidden = true;
+  setBadge();
+};
+
+const countDmUnread = () => {
+  const seen = store.get("dm-seen", 0);
+  dmUnread = dmDocs.filter((d) => d.data().from === "admin" && dmTime(d) > seen).length;
+  dmDot.hidden = !dmUnread;
+  setBadge();
+};
+
+const watchDm = (uid) => {
+  if (dmUid === uid) return;
+  if (dmUnsub) dmUnsub();
+  dmUnsub = null;
+  dmUid = uid;
+  dmDocs = [];
+  dmLoaded = false;
+  if (dmRx) dmRx.stop();
+  dmRx = uid ? makeRx(["dms", uid, "reactions"]) : null;
+  if (dmRx) dmRx.start();
+  renderDm();
+  if (!uid) return;
+  dmUnsub = onSnapshot(
+    query(collection(db, "dms", uid, "messages"), orderBy("createdAt", "asc"), limit(300)),
+    (snap) => {
+      const stick = !dmLoaded || dmList.scrollHeight - dmList.scrollTop - dmList.clientHeight < 80;
+      dmDocs = snap.docs;
+      dmLoaded = true;
+      renderDm();
+      if (isOpen() && chatMode === "private") markDmSeen();
+      else countDmUnread();
+      if (stick) dmList.scrollTop = dmList.scrollHeight;
+    },
+    (err) => {
+      console.warn("Private messages not loaded:", err.code || err);
+      dmList.replaceChildren(el("li", "chat-empty", err.code === "permission-denied"
+        ? "Private messages aren't set up yet (Firestore rules)."
+        : "Private messages can't be shown right now."));
+    }
+  );
+};
+
+// Only visitors (anonymous sign-in) have a private chat here; the admin uses the dashboard
+onAuthStateChanged(dmAuth, (u) => watchDm(u && u.isAnonymous ? u.uid : null));
+
+const setMode = (mode) => {
+  chatMode = mode === "private" ? "private" : "public";
+  const priv = chatMode === "private";
+  for (const b of modeBtns) {
+    const on = b.dataset.chatMode === chatMode;
+    b.classList.toggle("is-active", on);
+    b.setAttribute("aria-selected", String(on));
+  }
+  list.hidden = priv;
+  dmList.hidden = !priv;
+  dmNote.hidden = !priv;
+  panel.classList.toggle("is-private", priv);
+  if (chatSub) chatSub.textContent = priv ? `Private · only you and ${firstName()}` : "Community Chat · Active now";
+  textInput.placeholder = priv ? `Message ${firstName()} privately…` : "Aa";
+  textInput.maxLength = priv ? MAX_DM : MAX_TEXT;
+  setStatus("");
+  store.set("chat-mode", chatMode);
+  if (priv) {
+    renderDm();
+    if (isOpen()) markDmSeen();
+    requestAnimationFrame(() => { dmList.scrollTop = dmList.scrollHeight; });
+  } else {
+    scrollToBottom();
+  }
+};
+
+for (const b of modeBtns) b.addEventListener("click", () => {
+  setMode(b.dataset.chatMode);
+  if (window.matchMedia("(hover: hover)").matches) textInput.focus();
+});
+
+const sendPrivate = async (text, name) => {
+  sendBtn.disabled = true;
+  try {
+    let u = dmAuth.currentUser;
+    if (u && !u.isAnonymous) {
+      setStatus("You're signed in as the admin. Reply to private messages from the dashboard.");
+      return;
+    }
+    if (!u) u = (await signInAnonymously(dmAuth)).user;
+    watchDm(u.uid);
+
+    const [device, country] = await Promise.all([detectDevice(), detectCountry()]);
+    const threadRef = doc(db, "dms", u.uid);
+    await addDoc(collection(threadRef, "messages"), { from: "visitor", text: text.slice(0, MAX_DM), createdAt: serverTimestamp() });
+    await setDoc(threadRef, {
+      name: name || "Anonymous",
+      device: device.slice(0, 40),
+      country: country.code,
+      countryName: country.name,
+      lastText: text.slice(0, 120),
+      lastFrom: "visitor",
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+
+    lastSent = Date.now();
+    textInput.value = "";
+    autoGrow();
+    closePicker();
+    setStatus("");
+    dmList.scrollTop = dmList.scrollHeight;
+  } catch (err) {
+    console.error(err);
+    setStatus(err.code === "permission-denied"
+      ? "Couldn't send: private messages aren't set up yet (Firestore rules)."
+      : explainComment(err, "send your message"));
+  } finally {
+    updateComposer();
+    textInput.focus();
+  }
+};
+
+renderDm();
+if (store.get("chat-mode", "public") === "private") setMode("private");
+
 /* ---------- Visitors (who viewed the page) ---------- */
 const visitsRef = collection(db, "visits");
 const VISITS_PAGE = 20;            // visitors per page
@@ -1196,6 +1408,122 @@ const buildCommentSection = (postId) => {
   return { section, badge, more, list, form, me, nameInput: nameInput2, text, chars, send, status, emoji };
 };
 
+/* ---------- Confirmation for destructive actions (same behaviour as the dashboard) ---------- */
+// Cancel is the default; Escape and the backdrop cancel; buttons lock while working; it only
+// closes once the action really succeeded (errors stay in the dialog).
+const confirmDialog = (() => {
+  const root = el("div", "confirm-backdrop");
+  root.hidden = true;
+  const box = el("div", "confirm-box");
+  box.setAttribute("role", "alertdialog");
+  box.setAttribute("aria-modal", "true");
+  box.setAttribute("aria-labelledby", "confirmTitle");
+  box.setAttribute("aria-describedby", "confirmDesc");
+  const icon = el("span", "confirm-icon");
+  icon.append(commentIcon('<path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M10 11v6M14 11v6"/>'));
+  const title = el("h2", "confirm-title");
+  title.id = "confirmTitle";
+  const desc = el("p", "confirm-desc");
+  desc.id = "confirmDesc";
+  const note = el("p", "confirm-note");
+  const error = el("p", "confirm-error");
+  error.setAttribute("role", "alert");
+  error.hidden = true;
+  const actions = el("div", "confirm-actions");
+  const cancel = el("button", "confirm-btn confirm-cancel", "Cancel");
+  cancel.type = "button";
+  const ok = el("button", "confirm-btn confirm-ok");
+  ok.type = "button";
+  const okLabel = el("span", "", "Delete");
+  const spin = el("span", "confirm-spinner");
+  spin.setAttribute("aria-hidden", "true");
+  ok.append(spin, okLabel);
+  actions.append(cancel, ok);
+  const text = el("div", "confirm-text");
+  text.append(title, desc, note, error);
+  const head = el("div", "confirm-head");
+  head.append(icon, text);
+  box.append(head, actions);
+  root.append(box);
+  document.body.append(root);
+
+  let job = null;
+  let busy = false;
+  let opener = null;
+
+  const setBusy = (on) => {
+    busy = on;
+    ok.disabled = on;
+    cancel.disabled = on;
+    ok.classList.toggle("is-loading", on);
+    okLabel.textContent = on ? "Deleting…" : (job?.confirmLabel || "Delete");
+    box.setAttribute("aria-busy", String(on));
+  };
+
+  const hide = () => {
+    if (busy) return;
+    root.classList.remove("is-open");
+    root.hidden = true;
+    job = null;
+    if (opener && document.contains(opener)) opener.focus({ preventScroll: true });
+    opener = null;
+  };
+
+  cancel.addEventListener("click", hide);
+  root.addEventListener("click", (e) => { if (e.target === root) hide(); });
+  document.addEventListener("keydown", (e) => {
+    if (root.hidden) return;
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopImmediatePropagation();   // don't also close the dialog underneath
+      hide();
+    } else if (e.key === "Tab") {
+      const f = [cancel, ok].filter((b) => !b.disabled);
+      if (!f.length) { e.preventDefault(); return; }
+      const i = f.indexOf(document.activeElement);
+      if (e.shiftKey && i <= 0) { e.preventDefault(); f[f.length - 1].focus(); }
+      else if (!e.shiftKey && i === f.length - 1) { e.preventDefault(); f[0].focus(); }
+    }
+  }, true);
+
+  ok.addEventListener("click", async () => {
+    if (!job || busy) return;
+    const current = job;
+    setBusy(true);
+    error.hidden = true;
+    try {
+      await current.onConfirm();
+      setBusy(false);
+      hide();
+      if (current.done && window.showToast) window.showToast(current.done);
+    } catch (err) {
+      console.error(err);
+      setBusy(false);
+      error.textContent = current.explain ? current.explain(err) : "Couldn't do that. Please try again.";
+      error.hidden = false;
+      ok.focus();
+    }
+  });
+
+  return {
+    open: (opts) => {
+      job = opts;
+      opener = document.activeElement;
+      title.textContent = opts.title || "Delete item?";
+      desc.textContent = opts.message || "";
+      note.textContent = opts.note || "";
+      note.hidden = !opts.note;
+      error.hidden = true;
+      setBusy(false);
+      document.body.append(root);   // on top of any other pop-up
+      root.hidden = false;
+      void root.offsetWidth;
+      root.classList.add("is-open");
+      cancel.focus({ preventScroll: true });   // the safe choice is the default
+    },
+  };
+})();
+
 /* ---------- Post dialog: comments and "liked by" open in a pop-up ---------- */
 // One shared dialog. Clicking outside it (which covers the post's buttons), the X, or Escape closes it.
 const postDialog = (() => {
@@ -1449,7 +1777,26 @@ const createThread = (postId) => {
       return;
     }
     if (action === "edit") { editingId = id; confirmingId = null; render(); return; }
-    if (action === "delete") { confirmingId = id; editingId = null; render(); return; }
+    if (action === "delete" && d) {
+      const cd = d.data();
+      const own = canManage(cd);
+      editingId = null;
+      render();
+      confirmDialog.open({
+        title: "Delete comment?",
+        message: own
+          ? `Your comment “${String(cd.text || "").slice(0, 60)}${String(cd.text || "").length > 60 ? "…" : ""}” will be removed for everyone.`
+          : `${cd.name || "Anonymous"}'s comment will be removed for everyone.`,
+        note: "This can't be undone.",
+        done: "Comment deleted",
+        explain: (err) => explainComment(err, "delete the comment"),
+        onConfirm: async () => {
+          await ensureCommentUser();
+          await deleteDoc(doc(commentsRef, id));
+        },
+      });
+      return;
+    }
     if (action === "cancel") { editingId = null; confirmingId = null; setStatus2(""); render(); return; }
     if (action === "save") { saveEdit(id); return; }
     if (action === "delete-yes") {

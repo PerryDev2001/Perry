@@ -94,36 +94,111 @@ const errText = (err, action) =>
     ? `Couldn't ${action}: the Firestore rules don't allow it. Publish the latest rules.`
     : `Couldn't ${action}. Please try again.`;
 
-// Two-step delete button ("Delete" → "Confirm") with a trash icon
-const deleteButton = ({ onConfirm, iconOnly = false, className = "" }) => {
-  const b = el("button", `btn btn-sm ${iconOnly ? "btn-icon btn-ghost" : "btn-destructive-ghost"} ${className}`);
-  b.type = "button";
-  b.setAttribute("aria-label", "Delete");
-  const label = el("span", "", iconOnly ? "" : "Delete");
-  b.append(svg(TRASH), label);
+// Short preview of a text for confirmation messages
+const snippet = (text, n = 60) => {
+  const t = String(text || "").replace(/\s+/g, " ").trim();
+  return t.length > n ? `${t.slice(0, n - 1)}…` : t;
+};
+
+/* ---------- Notifications ---------- */
+const toast = (() => {
+  const node = document.getElementById("toast");
   let timer = 0;
-  b.addEventListener("click", async () => {
-    if (!b.classList.contains("is-confirm")) {
-      b.classList.add("is-confirm");
-      if (!iconOnly) { label.textContent = "Confirm"; b.classList.add("btn-destructive"); }
-      b.setAttribute("aria-label", "Click again to delete");
-      timer = setTimeout(() => {
-        b.classList.remove("is-confirm", "btn-destructive");
-        if (!iconOnly) label.textContent = "Delete";
-        b.setAttribute("aria-label", "Delete");
-      }, 4000);
-      return;
-    }
+  return (text, kind = "ok") => {
+    node.textContent = text;
+    node.dataset.kind = kind;
+    node.hidden = false;
+    requestAnimationFrame(() => node.classList.add("is-shown"));
     clearTimeout(timer);
-    b.disabled = true;
+    timer = setTimeout(() => {
+      node.classList.remove("is-shown");
+      setTimeout(() => { if (!node.classList.contains("is-shown")) node.hidden = true; }, 250);
+    }, 2600);
+  };
+})();
+
+/* ---------- Delete confirmation ---------- */
+// Every delete goes through this dialog: it says exactly what will be removed, Cancel is the
+// default, Escape/backdrop cancel, buttons lock while deleting, and it only closes when the
+// delete really succeeded (errors stay in the dialog).
+const confirmDelete = (() => {
+  const dialog = document.getElementById("confirmDialog");
+  const titleEl = document.getElementById("confirmTitle");
+  const descEl = document.getElementById("confirmDesc");
+  const noteEl = document.getElementById("confirmNote");
+  const errorEl = document.getElementById("confirmError");
+  const cancelBtn = document.getElementById("confirmCancel");
+  const okBtn = document.getElementById("confirmOk");
+  const okLabel = document.getElementById("confirmOkLabel");
+  let job = null;
+  let busy = false;
+  let opener = null;
+
+  const setBusy = (on) => {
+    busy = on;
+    okBtn.disabled = on;
+    cancelBtn.disabled = on;
+    okBtn.classList.toggle("is-loading", on);
+    okLabel.textContent = on ? "Deleting…" : (job?.confirmLabel || "Delete");
+    dialog.setAttribute("aria-busy", String(on));
+  };
+
+  const close = () => { if (!busy) dialog.close(); };
+  cancelBtn.addEventListener("click", close);
+  dialog.addEventListener("cancel", (e) => { e.preventDefault(); close(); });            // Escape
+  dialog.addEventListener("click", (e) => { if (e.target === dialog) close(); });        // backdrop
+  dialog.addEventListener("close", () => {
+    job = null;
+    if (opener && document.contains(opener)) opener.focus({ preventScroll: true });
+    opener = null;
+  });
+
+  okBtn.addEventListener("click", async () => {
+    if (!job || busy) return;
+    const current = job;
+    setBusy(true);
+    errorEl.hidden = true;
     try {
-      await onConfirm();
+      await current.onConfirm();
+      setBusy(false);
+      dialog.close();
+      toast(current.done || "Deleted");
     } catch (err) {
       console.error(err);
-      b.disabled = false;
-      alert(errText(err, "delete it"));
+      setBusy(false);
+      errorEl.textContent = errText(err, "delete it");
+      errorEl.hidden = false;
+      okBtn.focus();
     }
   });
+
+  return (opts) => {
+    job = opts;
+    opener = opts.opener || document.activeElement;
+    titleEl.textContent = opts.title || "Delete item?";
+    descEl.textContent = opts.message || "This can't be undone.";
+    noteEl.textContent = opts.note || "";
+    noteEl.hidden = !opts.note;
+    errorEl.hidden = true;
+    setBusy(false);
+    if (!dialog.open) dialog.showModal();
+    cancelBtn.focus();   // the safe choice is the default
+  };
+})();
+
+// Delete button: subtle red, opens the confirmation (never deletes on the first click)
+const deleteButton = ({
+  onConfirm, iconOnly = false, className = "",
+  title = "Delete item?", message = "This can't be undone.", note = "", confirmLabel = "Delete", done = "Deleted",
+}) => {
+  const b = el("button", `btn btn-sm ${iconOnly ? "btn-icon btn-delete-icon" : "btn-delete"} ${className}`.trim());
+  b.type = "button";
+  const label = title.replace(/\?$/, "");
+  b.setAttribute("aria-label", label);
+  b.title = label;
+  b.append(svg(TRASH));
+  if (!iconOnly) b.append(el("span", "", "Delete"));
+  b.addEventListener("click", () => confirmDelete({ onConfirm, title, message, note, confirmLabel, done, opener: b }));
   return b;
 };
 
@@ -183,7 +258,7 @@ document.getElementById("sidebarClose").addEventListener("click", closeMenu);
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeMenu(); });
 
 /* ---------- Tabs (#overview, #posts, …) ---------- */
-const TITLES = { overview: "Overview", posts: "Posts", messages: "Messages", submissions: "Anonymous posts", comments: "Comments", visitors: "Visitors", profile: "Profile" };
+const TITLES = { overview: "Overview", posts: "Posts", messages: "Messages", inbox: "Private messages", submissions: "Anonymous posts", comments: "Comments", visitors: "Visitors", profile: "Profile" };
 const loaded = new Set();
 
 const showTab = () => {
@@ -241,7 +316,7 @@ const removeRow = (row) => {
   setTimeout(() => row.remove(), 250);
 };
 
-const listRow = (d, { title, sub, body, time, avatar }) => {
+const listRow = (d, { title, sub, body, time, avatar, del = {} }) => {
   const li = el("li", "row");
   li.append(avatar || initialAvatar(title));
   const main = el("div", "row-main");
@@ -253,7 +328,7 @@ const listRow = (d, { title, sub, body, time, avatar }) => {
   main.append(el("span", "row-time", time));
   li.append(main);
   const actions = el("div", "row-actions");
-  actions.append(deleteButton({ onConfirm: async () => { await deleteDoc(d.ref); removeRow(li); } }));
+  actions.append(deleteButton({ ...del, onConfirm: async () => { await deleteDoc(d.ref); removeRow(li); } }));
   li.append(actions);
   return li;
 };
@@ -290,6 +365,13 @@ const miniInto = async (name, id) => {
 };
 
 /* ---------- Messages: live chat ---------- */
+/* ---------- Message reactions (shared with the public page: reactions.js) ---------- */
+const rxFs = { collection, doc, query, limit, onSnapshot, setDoc, deleteDoc, serverTimestamp };
+const rxMe = () => ({ uid: user.uid, name: profileName, admin: true });
+const makeRx = (path, onError) => (window.createReactions
+  ? window.createReactions({ fs: rxFs, db, path, me: rxMe, ensureMe: async () => rxMe(), onError })
+  : null);
+
 const chat = (() => {
   const scrollEl = document.getElementById("chatScroll");
   const thread = document.getElementById("chatThread");
@@ -309,6 +391,7 @@ const chat = (() => {
   let hasOlder = false;
   let started = false;
   let seen = null;   // ids seen while the tab was open
+  let chatRx = null;
 
   const nearBottom = () => scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight < 80;
   const scrollToEnd = () => requestAnimationFrame(() => { scrollEl.scrollTop = scrollEl.scrollHeight; });
@@ -366,10 +449,15 @@ const chat = (() => {
       row.append(text, deleteButton({
         iconOnly: true,
         className: "t-del",
+        title: "Delete message?",
+        message: `“${snippet(m.text)}” from ${m.admin ? "you" : (m.name || "Anonymous")} will be removed from the Community Chat for everyone.`,
+        note: "This can't be undone.",
+        done: "Message deleted",
         onConfirm: async () => { await deleteDoc(d.ref); },
       }));
       body.append(row);
       li.append(body);
+      if (chatRx) chatRx.decorate(li, body, d.id);
       items.push(li);
       prev = { date, key: key(m) };
     });
@@ -383,6 +471,8 @@ const chat = (() => {
   const start = () => {
     if (started) return;
     started = true;
+    chatRx = makeRx(["chatReactions"], (err) => setMessage(msg, errText(err, "react")));
+    if (chatRx) chatRx.start();
     onSnapshot(
       query(ref, orderBy("createdAt", "desc"), limit(PAGE)),
       (snap) => {
@@ -462,6 +552,248 @@ const chat = (() => {
   };
 })();
 
+/* ---------- Private messages (one conversation per visitor) ---------- */
+const inbox = (() => {
+  const card = document.getElementById("dmCard");
+  const listEl = document.getElementById("dmThreadList");
+  const countEl = document.getElementById("dmThreadCount");
+  const placeholder = document.getElementById("dmPlaceholder");
+  const openEl = document.getElementById("dmOpen");
+  const headAvatar = document.getElementById("dmHeadAvatar");
+  const headName = document.getElementById("dmHeadName");
+  const headSub = document.getElementById("dmHeadSub");
+  const headActions = document.getElementById("dmHeadActions");
+  const scrollEl = document.getElementById("dmScroll");
+  const threadEl = document.getElementById("dmThread");
+  const form = document.getElementById("dmForm");
+  const input = document.getElementById("dmInput");
+  const send = document.getElementById("dmSend");
+  const msg = document.getElementById("dmMessage");
+  const navBadge = document.getElementById("navInbox");
+  const GAP = 10 * 60 * 1000;
+
+  let threads = [];
+  let openId = null;
+  let unsubMsgs = null;
+  let started = false;
+  let dmRx = null;
+
+  const ms = (t) => t?.toDate?.()?.getTime?.() || 0;
+  const isUnread = (v) => v.lastFrom === "visitor" && ms(v.updatedAt) > ms(v.adminReadAt);
+  const onTab = () => !document.querySelector('[data-panel="inbox"]').hidden;
+  const scrollToEnd = () => requestAnimationFrame(() => { scrollEl.scrollTop = scrollEl.scrollHeight; });
+
+  const stamp = (date) => {
+    const time = date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    return date.toDateString() === new Date().toDateString()
+      ? time
+      : `${date.toLocaleDateString([], { month: "short", day: "numeric" })}, ${time}`;
+  };
+
+  const markRead = (id) => {
+    const t = threads.find((d) => d.id === id);
+    if (t && isUnread(t.data())) updateDoc(t.ref, { adminReadAt: serverTimestamp() }).catch((err) => console.warn(err));
+  };
+
+  const renderThreads = () => {
+    const unread = threads.filter((d) => isUnread(d.data())).length;
+    navBadge.hidden = !unread;
+    navBadge.textContent = unread > 9 ? "9+" : String(unread);
+    countEl.textContent = threads.length ? `${threads.length}${unread ? ` · ${unread} unread` : ""}` : "";
+
+    if (!threads.length) {
+      listEl.replaceChildren(el("li", "empty pad", "No private messages yet. Visitors can start one from the chat on your page."));
+      return;
+    }
+    listEl.replaceChildren(...threads.map((d) => {
+      const v = d.data({ serverTimestamps: "estimate" });
+      const li = el("li");
+      const b = el("button", "dm-thread");
+      b.type = "button";
+      if (d.id === openId) b.classList.add("is-active");
+      if (isUnread(v)) b.classList.add("is-unread");
+      const main = el("span", "dm-thread-main");
+      const top = el("span", "dm-thread-top");
+      top.append(el("strong", "", v.name || "Anonymous"), el("span", "row-time", ago(v.updatedAt?.toDate?.())));
+      main.append(top, el("span", "dm-thread-last", `${v.lastFrom === "admin" ? "You: " : ""}${v.lastText || ""}`));
+      b.append(initialAvatar(v.name || "Anonymous"), main);
+      if (isUnread(v)) b.append(el("span", "dm-unread-dot"));
+      b.addEventListener("click", () => open(d.id));
+      li.append(b);
+      return li;
+    }));
+  };
+
+  const renderMessages = (docs, v) => {
+    if (!docs.length) {
+      threadEl.replaceChildren(el("li", "empty center", "No messages in this conversation."));
+      return;
+    }
+    const items = [];
+    let prev = null;
+    docs.forEach((d, i) => {
+      const m = d.data({ serverTimestamps: "estimate" });
+      const date = m.createdAt?.toDate?.() || new Date();
+      if (!prev || date - prev.date >= GAP || prev.date.toDateString() !== date.toDateString()) {
+        items.push(el("li", "t-time", stamp(date)));
+      }
+      const next = docs[i + 1]?.data({ serverTimestamps: "estimate" });
+      const nextDate = next?.createdAt?.toDate?.() || new Date();
+      const first = !prev || prev.from !== m.from || date - prev.date >= GAP;
+      const last = !next || next.from !== m.from || nextDate - date >= GAP;
+      const mineMsg = m.from === "admin";
+
+      const li = el("li", "t-msg");
+      if (mineMsg) li.classList.add("is-mine", "is-admin");
+      if (!first) li.classList.add("is-cont");
+      if (last) li.classList.add("is-last");
+      li.append(mineMsg ? photoAvatar() : initialAvatar(v.name || "Anonymous"));
+      const body = el("div", "t-body");
+      if (first) {
+        const meta = el("div", "t-meta");
+        meta.append(el("strong", "", mineMsg ? profileName : (v.name || "Anonymous")));
+        body.append(meta);
+      }
+      const row = el("div", "t-bubble-row");
+      const text = el("p", "t-text", m.text);
+      text.title = fullDate(date);
+      row.append(text);
+      body.append(row);
+      li.append(body);
+      if (dmRx) dmRx.decorate(li, body, d.id);
+      items.push(li);
+      prev = { date, from: m.from };
+    });
+    threadEl.replaceChildren(...items);
+  };
+
+  const fillHead = (d) => {
+    const v = d.data();
+    headAvatar.replaceChildren(initialAvatar(v.name || "Anonymous"));
+    headName.textContent = v.name || "Anonymous";
+    headSub.textContent = [v.device, place(v.country, v.countryName)].filter(Boolean).join(" · ") || "Private conversation";
+  };
+
+  const close = () => {
+    if (unsubMsgs) unsubMsgs();
+    unsubMsgs = null;
+    if (dmRx) dmRx.stop();
+    dmRx = null;
+    openId = null;
+    card.classList.remove("is-open");
+    openEl.hidden = true;
+    placeholder.hidden = false;
+    renderThreads();
+  };
+
+  const open = (id) => {
+    const t = threads.find((d) => d.id === id);
+    if (!t) return;
+    if (unsubMsgs) unsubMsgs();
+    if (dmRx) dmRx.stop();
+    dmRx = makeRx(["dms", id, "reactions"], (err) => setMessage(msg, errText(err, "react")));
+    if (dmRx) dmRx.start();
+    openId = id;
+    card.classList.add("is-open");
+    placeholder.hidden = true;
+    openEl.hidden = false;
+    fillHead(t);
+    setMessage(msg, "");
+    threadEl.replaceChildren(el("li", "empty center", "Loading…"));
+    const who = t.data().name || "Anonymous";
+    headActions.replaceChildren(deleteButton({
+      iconOnly: true,
+      title: "Delete conversation?",
+      message: `Your whole private conversation with ${who} will be deleted.`,
+      note: "All of its messages and reactions are removed permanently, for you and for them. If they write again, a new conversation starts.",
+      confirmLabel: "Delete conversation",
+      done: "Conversation deleted",
+      onConfirm: async () => {
+        for (const sub of ["messages", "reactions"]) {
+          const snap = await getDocs(collection(db, "dms", id, sub));
+          for (const m of snap.docs) await deleteDoc(m.ref);
+        }
+        await deleteDoc(doc(db, "dms", id));
+        close();
+      },
+    }));
+    unsubMsgs = onSnapshot(
+      query(collection(db, "dms", id, "messages"), orderBy("createdAt", "asc"), limit(300)),
+      (snap) => {
+        const cur = threads.find((d) => d.id === id);
+        renderMessages(snap.docs, (cur || t).data());
+        scrollToEnd();
+        if (onTab()) markRead(id);
+      },
+      (err) => threadEl.replaceChildren(el("li", "empty center", errText(err, "load this conversation")))
+    );
+    renderThreads();
+    markRead(id);
+    if (matchMedia("(hover: hover)").matches) input.focus({ preventScroll: true });
+  };
+
+  const start = () => {
+    if (started) return;
+    started = true;
+    onSnapshot(
+      query(collection(db, "dms"), orderBy("updatedAt", "desc"), limit(100)),
+      (snap) => {
+        threads = snap.docs;
+        if (openId) {
+          const cur = threads.find((d) => d.id === openId);
+          if (!cur) close();
+          else {
+            fillHead(cur);
+            if (onTab()) markRead(openId);
+          }
+        }
+        renderThreads();
+      },
+      (err) => listEl.replaceChildren(el("li", "empty pad", errText(err, "load private messages")))
+    );
+  };
+
+  document.getElementById("dmBack").addEventListener("click", close);
+
+  const grow = () => {
+    input.style.height = "auto";
+    input.style.height = `${Math.min(input.scrollHeight, 140)}px`;
+    send.disabled = !input.value.trim();
+  };
+  input.addEventListener("input", grow);
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); form.requestSubmit(); }
+  });
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const text = input.value.replace(/\s+\n/g, "\n").trim().slice(0, 1000);
+    if (!text || !openId) return;
+    const id = openId;
+    send.disabled = true;
+    try {
+      await addDoc(collection(db, "dms", id, "messages"), { from: "admin", text, createdAt: serverTimestamp() });
+      await updateDoc(doc(db, "dms", id), {
+        lastText: text.slice(0, 120),
+        lastFrom: "admin",
+        updatedAt: serverTimestamp(),
+        adminReadAt: serverTimestamp(),
+      });
+      input.value = "";
+      setMessage(msg, "");
+      scrollToEnd();
+    } catch (err) {
+      console.error(err);
+      setMessage(msg, errText(err, "send"));
+    } finally {
+      grow();
+      input.focus();
+    }
+  });
+
+  return { start, markOpenRead: () => { if (openId) markRead(openId); } };
+})();
+
 /* ---------- Anonymous posts: visitors' posts waiting for approval ---------- */
 const CHECK = '<path d="m5 12.5 4.5 4.5L19 7.5"/>';
 const EYE_OFF = '<path d="M3 3l18 18M10.6 10.6a2 2 0 0 0 2.8 2.8M9.9 5.1A10 10 0 0 1 12 5c6.4 0 10 7 10 7a17 17 0 0 1-3.2 4.1M6.6 6.6A17 17 0 0 0 2 12s3.6 7 10 7a9.7 9.7 0 0 0 5.4-1.6"/>';
@@ -513,7 +845,15 @@ const submissions = (() => {
     actions.append(approved
       ? statusButton(d, "pending", "Unpublish", EYE_OFF, "btn-outline")
       : statusButton(d, "approved", "Approve", CHECK, "btn-primary"));
-    actions.append(deleteButton({ onConfirm: async () => { await deleteDoc(d.ref); } }));
+    actions.append(deleteButton({
+      title: "Delete post?",
+      message: `${v.name || "Anonymous"}'s post “${snippet(v.text)}” will be deleted.`,
+      note: approved
+        ? "It's live on your page now and will disappear for everyone. This can't be undone."
+        : "It was never shown on your page. This can't be undone.",
+      done: "Post deleted",
+      onConfirm: async () => { await deleteDoc(d.ref); },
+    }));
     li.append(actions);
     return li;
   };
@@ -660,6 +1000,10 @@ const loaders = {
     countInto("messages", "countMessages");
     countInto("comments", "countComments");
     countInto("posts", "countPosts");
+    countInto("dms", "countDms");
+    getCountFromServer(query(collection(db, "submissions"), where("status", "==", "pending")))
+      .then((s) => { document.getElementById("countPending").textContent = s.data().count.toLocaleString(); })
+      .catch(() => { document.getElementById("countPending").textContent = "—"; });
     miniInto("comments", "ovComments");
     miniInto("messages", "ovMessages");
   },
@@ -670,6 +1014,10 @@ const loaders = {
 
   submissions() {
     submissions.start();
+  },
+
+  inbox() {
+    inbox.start();
   },
 
   comments() {
@@ -743,6 +1091,12 @@ const loaders = {
                 sub: [c.device, place(c.country, c.countryName)].filter(Boolean).join(" · "),
                 body: c.text,
                 time: `${fullDate(c.createdAt?.toDate?.())}${c.editedAt ? " · edited" : ""}`,
+                del: {
+                  title: "Delete comment?",
+                  message: `${c.name || "Anonymous"}'s comment “${snippet(c.text)}” will be removed for everyone.`,
+                  note: "This can't be undone.",
+                  done: "Comment deleted",
+                },
               });
             })
             : [el("li", "empty", "No comments on this post yet.")]));
@@ -874,6 +1228,12 @@ const loaders = {
             avatar: photoAvatar(),
             body: p.text,
             time: fullDate(p.createdAt?.toDate?.()),
+            del: {
+              title: "Delete post?",
+              message: `Your post “${snippet(p.text)}” will be removed from your page for everyone.`,
+              note: "Its likes and comments won't be shown anymore. This can't be undone.",
+              done: "Post deleted",
+            },
           });
         }));
       },
@@ -887,7 +1247,10 @@ const loaders = {
 };
 
 // Opening the Messages tab clears its badge
-window.addEventListener("hashchange", () => { if (location.hash === "#messages") chat.markSeen(); });
+window.addEventListener("hashchange", () => {
+  if (location.hash === "#messages") chat.markSeen();
+  if (location.hash === "#inbox") inbox.markOpenRead();
+});
 
 /* ---------- Posts: write ---------- */
 const postForm = document.getElementById("postForm");
@@ -994,6 +1357,7 @@ pf.form.addEventListener("submit", async (e) => {
 loadProfile().then(applySide);
 chat.start();            // live badge for new messages, even on other tabs
 submissions.start();     // live badge for posts waiting for review
+inbox.start();           // live badge for unread private messages
 window.addEventListener("hashchange", showTab);
 showTab();
 })();

@@ -252,6 +252,110 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // A message reaction: one of six emoji, from the signed-in person (only admins can mark it admin)
+    function validReaction(d) {
+      return d.keys().hasOnly(['msg', 'uid', 'emoji', 'name', 'admin', 'createdAt']) &&
+        d.keys().hasAll(['msg', 'uid', 'emoji', 'name', 'admin', 'createdAt']) &&
+        d.uid == request.auth.uid &&
+        d.emoji in ['👍', '❤️', '😂', '😮', '😢', '🙏'] &&
+        d.name is string &&
+        d.name.size() <= 60 &&
+        d.admin is bool &&
+        (d.admin == false || isAdmin()) &&
+        d.createdAt == request.time;
+    }
+
+    // Private messages: one conversation per visitor, stored under their anonymous sign-in id.
+    // Only that visitor and admins can read or write it, so nobody else can see these messages.
+    function validDmThread(d) {
+      return d.name is string && d.name.size() > 0 && d.name.size() <= 24 &&
+        d.device is string && d.device.size() <= 40 &&
+        d.country is string && d.country.size() <= 2 &&
+        d.countryName is string && d.countryName.size() <= 56 &&
+        d.lastText is string && d.lastText.size() <= 120 &&
+        d.lastFrom == 'visitor' &&
+        d.updatedAt == request.time;
+    }
+
+    match /dms/{threadId} {
+      allow read: if isAdmin() || (request.auth != null && request.auth.uid == threadId);
+
+      allow create: if
+        request.auth != null &&
+        request.auth.uid == threadId &&
+        request.resource.data.keys().hasOnly(['name', 'device', 'country', 'countryName', 'lastText', 'lastFrom', 'updatedAt']) &&
+        request.resource.data.keys().hasAll(['name', 'device', 'country', 'countryName', 'lastText', 'lastFrom', 'updatedAt']) &&
+        validDmThread(request.resource.data);
+
+      allow update: if
+        (request.auth != null &&
+          request.auth.uid == threadId &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'device', 'country', 'countryName', 'lastText', 'lastFrom', 'updatedAt']) &&
+          validDmThread(request.resource.data)) ||
+        (isAdmin() &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastText', 'lastFrom', 'updatedAt', 'adminReadAt']) &&
+          request.resource.data.lastText is string &&
+          request.resource.data.lastText.size() <= 120);
+
+      allow delete: if isAdmin();
+
+      match /messages/{messageId} {
+        allow read: if isAdmin() || (request.auth != null && request.auth.uid == threadId);
+
+        allow create: if
+          request.auth != null &&
+          request.resource.data.keys().hasOnly(['from', 'text', 'createdAt']) &&
+          request.resource.data.keys().hasAll(['from', 'text', 'createdAt']) &&
+          request.resource.data.text is string &&
+          request.resource.data.text.size() > 0 &&
+          request.resource.data.text.size() <= 1000 &&
+          request.resource.data.createdAt == request.time &&
+          ((request.auth.uid == threadId && request.resource.data.from == 'visitor') ||
+            (isAdmin() && request.resource.data.from == 'admin'));
+
+        allow update: if false;
+        allow delete: if isAdmin();
+      }
+
+      // Reactions in a private chat: only the visitor and admins can see or add them.
+      match /reactions/{reactionId} {
+        allow read: if isAdmin() || (request.auth != null && request.auth.uid == threadId);
+
+        allow create, update: if
+          request.auth != null &&
+          (isAdmin() || request.auth.uid == threadId) &&
+          request.resource.data.msg is string &&
+          request.resource.data.msg.size() > 0 &&
+          request.resource.data.msg.size() <= 40 &&
+          reactionId == request.resource.data.msg + '_' + request.auth.uid &&
+          exists(/databases/$(database)/documents/dms/$(threadId)/messages/$(request.resource.data.msg)) &&
+          validReaction(request.resource.data);
+
+        allow delete: if
+          isAdmin() ||
+          (request.auth != null && request.auth.uid == threadId && resource.data.uid == request.auth.uid);
+      }
+    }
+
+    // Reactions on Community Chat messages: one per person per message ("{message}_{uid}").
+    // Anyone can see them; you can add, change or remove only your own (admins can remove any).
+    match /chatReactions/{reactionId} {
+      allow read: if true;
+
+      allow create, update: if
+        request.auth != null &&
+        request.resource.data.msg is string &&
+        request.resource.data.msg.size() > 0 &&
+        request.resource.data.msg.size() <= 40 &&
+        reactionId == request.resource.data.msg + '_' + request.auth.uid &&
+        exists(/databases/$(database)/documents/messages/$(request.resource.data.msg)) &&
+        validReaction(request.resource.data);
+
+      allow delete: if
+        isAdmin() ||
+        (request.auth != null && resource.data.uid == request.auth.uid);
+    }
+
     // Everything else is closed.
     match /{document=**} {
       allow read, write: if false;

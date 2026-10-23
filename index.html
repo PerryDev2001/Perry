@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="description" content="Perry Philip Lozano — profile, posts and public chat." />
+  <meta name="description" content="Perry Philip Lozano — profile, posts and Community Chat." />
   <meta name="color-scheme" content="light dark" />
   <title>Perry Philip Lozano</title>
 
@@ -90,7 +90,7 @@
             </li>
             <li>
               <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 9.3 9.3 0 0 1-3.6-.7L3 21l1.6-4.6A8 8 0 0 1 3 11.5 8.6 8.6 0 0 1 12 3a8.6 8.6 0 0 1 9 8.5Z" /></svg>
-              <span>Public chat · <button class="link-btn" type="button" data-open-chat>say hi</button></span>
+              <span>Community Chat · <button class="link-btn" type="button" data-open-chat>say hi</button></span>
             </li>
           </ul>
         </section>
@@ -175,7 +175,7 @@
   <!-- ---------- Chat window (Messenger style) ---------- -->
   <div class="chat">
     <!-- Floating chat button (lower right) -->
-    <button class="chat-fab" type="button" id="chatFab" aria-label="Open public chat" aria-controls="chatPanel">
+    <button class="chat-fab" type="button" id="chatFab" aria-label="Open chat" aria-controls="chatPanel">
       <svg class="icon" viewBox="0 0 24 24" aria-hidden="true">
         <path d="M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v8a2.5 2.5 0 0 1-2.5 2.5H11l-4.5 3.5V17A2.5 2.5 0 0 1 4 14.5v-8Z" /><circle cx="8.5" cy="10.5" r="1.1" fill="currentColor" stroke="none" /><circle cx="12" cy="10.5" r="1.1" fill="currentColor" stroke="none" /><circle cx="15.5" cy="10.5" r="1.1" fill="currentColor" stroke="none" />
       </svg>
@@ -190,7 +190,7 @@
           </span>
           <div>
             <h2 class="chat-title" id="chatTitle">Chat with Perry</h2>
-            <p class="chat-sub">Public chat · Active now</p>
+            <p class="chat-sub">Community Chat · Active now</p>
           </div>
         </div>
         <button class="chat-close" type="button" id="chatClose" aria-label="Close chat">
@@ -198,9 +198,28 @@
         </button>
       </header>
 
+      <!-- Community Chat (everyone) or a private chat with the owner -->
+      <div class="chat-modes" id="chatModes" role="tablist" aria-label="Chat type">
+        <button class="chat-mode is-active" type="button" role="tab" aria-selected="true" data-chat-mode="public">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" /></svg>
+          Community Chat
+        </button>
+        <button class="chat-mode" type="button" role="tab" aria-selected="false" data-chat-mode="private">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8 11V8a4 4 0 0 1 8 0v3" /></svg>
+          Private
+          <span class="chat-mode-dot" id="dmDot" hidden></span>
+        </button>
+      </div>
+
       <ol class="chat-list" id="chatList" aria-live="polite">
         <li class="chat-empty">Loading messages…</li>
       </ol>
+
+      <p class="dm-note" id="dmNote" hidden>
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8 11V8a4 4 0 0 1 8 0v3" /></svg>
+        <span>Private: only you and <strong data-first-name>Perry</strong> can see these messages.</span>
+      </p>
+      <ol class="chat-list dm-list" id="dmList" aria-live="polite" hidden></ol>
 
       <p class="chat-status" id="chatStatus" role="status" hidden></p>
 
@@ -245,6 +264,7 @@
   </div>
 
   <script src="script.js"></script>
+  <script src="reactions.js" defer></script>
   <script src="chat.js" defer></script>
 </body>
 </html>

@@ -17,7 +17,7 @@
 
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..800&family=Sora:wght@600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="admin.css" />
 </head>
 <body class="dash-page">
@@ -59,6 +59,11 @@
           <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v10Z" /></svg>
           Messages
           <span class="nav-badge" id="navMessages" hidden></span>
+        </a>
+        <a href="#inbox" data-tab="inbox">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8 11V8a4 4 0 0 1 8 0v3" /></svg>
+          Private messages
+          <span class="nav-badge" id="navInbox" hidden></span>
         </a>
         <a href="#submissions" data-tab="submissions">
           <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>
@@ -138,7 +143,7 @@
             <a class="card stat" href="#messages">
               <div class="stat-top"><span>Chat messages</span><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v10Z" /></svg></div>
               <strong class="stat-value" id="countMessages">–</strong>
-              <span class="stat-note">In the public chat</span>
+              <span class="stat-note">In the Community Chat</span>
             </a>
             <a class="card stat" href="#comments">
               <div class="stat-top"><span>Comments</span><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z" /></svg></div>
@@ -149,6 +154,16 @@
               <div class="stat-top"><span>Posts</span><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5Z" /><path d="M14 3v5h5" /></svg></div>
               <strong class="stat-value" id="countPosts">–</strong>
               <span class="stat-note">Published on your profile</span>
+            </a>
+            <a class="card stat" href="#submissions">
+              <div class="stat-top"><span>Pending posts</span><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg></div>
+              <strong class="stat-value" id="countPending">–</strong>
+              <span class="stat-note">Visitor posts to review</span>
+            </a>
+            <a class="card stat" href="#inbox">
+              <div class="stat-top"><span>Private chats</span><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8 11V8a4 4 0 0 1 8 0v3" /></svg></div>
+              <strong class="stat-value" id="countDms">–</strong>
+              <span class="stat-note">One-to-one conversations</span>
             </a>
           </div>
 
@@ -214,14 +229,14 @@
         <section class="panel panel-chat" data-panel="messages" hidden>
           <div class="page-head">
             <h1>Messages</h1>
-            <p>The public chat. Your replies show your profile photo and name.</p>
+            <p>The Community Chat. Your replies show your profile photo and name.</p>
           </div>
 
           <div class="card chat-card">
             <div class="chat-card-head">
               <img id="chatAdminAvatar" src="img/ppl.jpg" alt="" width="36" height="36" />
               <div>
-                <h2>Public chat</h2>
+                <h2>Community Chat</h2>
                 <p><span class="dot-live" aria-hidden="true"></span> Live · <span id="chatCount">–</span></p>
               </div>
             </div>
@@ -238,6 +253,54 @@
               </button>
             </form>
             <p class="alert chat-alert" id="adminChatMessage" role="status" hidden></p>
+          </div>
+        </section>
+
+        <!-- Private messages -->
+        <section class="panel panel-chat" data-panel="inbox" hidden>
+          <div class="page-head">
+            <h1>Private messages</h1>
+            <p>One-to-one chats with visitors. Only you and that visitor can see them.</p>
+          </div>
+
+          <div class="card dm-card" id="dmCard">
+            <aside class="dm-threads" aria-label="Conversations">
+              <div class="dm-threads-head"><strong>Conversations</strong><span class="muted" id="dmThreadCount"></span></div>
+              <ul class="dm-thread-list" id="dmThreadList"><li class="empty pad">Loading…</li></ul>
+            </aside>
+
+            <div class="dm-convo">
+              <div class="dm-placeholder" id="dmPlaceholder">
+                <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8 11V8a4 4 0 0 1 8 0v3" /></svg>
+                <p>Pick a conversation to read and reply.</p>
+              </div>
+
+              <div class="dm-open" id="dmOpen" hidden>
+                <div class="chat-card-head dm-head">
+                  <button class="btn btn-ghost btn-icon dm-back" type="button" id="dmBack" aria-label="Back to conversations">
+                    <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m15 6-6 6 6 6" /></svg>
+                  </button>
+                  <span id="dmHeadAvatar"></span>
+                  <div class="dm-head-text">
+                    <h2 id="dmHeadName"></h2>
+                    <p id="dmHeadSub"></p>
+                  </div>
+                  <span class="dm-head-actions" id="dmHeadActions"></span>
+                </div>
+
+                <div class="chat-scroll" id="dmScroll">
+                  <ol class="thread" id="dmThread"></ol>
+                </div>
+
+                <form class="chat-compose" id="dmForm" autocomplete="off">
+                  <textarea class="textarea chat-input" id="dmInput" rows="1" maxlength="1000" placeholder="Reply privately…" aria-label="Private reply"></textarea>
+                  <button class="btn btn-primary btn-icon-lg" type="submit" id="dmSend" aria-label="Send" disabled>
+                    <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m22 2-7 20-4-9-9-4Z" /><path d="M22 2 11 13" /></svg>
+                  </button>
+                </form>
+                <p class="alert chat-alert" id="dmMessage" role="status" hidden></p>
+              </div>
+            </div>
           </div>
         </section>
 
@@ -334,6 +397,31 @@
     </div>
   </div>
 
+  <!-- Delete confirmation (Cancel is the default) -->
+  <dialog class="dialog confirm" id="confirmDialog" role="alertdialog" aria-labelledby="confirmTitle" aria-describedby="confirmDesc">
+    <div class="confirm-body">
+      <span class="confirm-icon" aria-hidden="true">
+        <svg class="icon" viewBox="0 0 24 24"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M10 11v6M14 11v6"/></svg>
+      </span>
+      <div class="confirm-text">
+        <h2 id="confirmTitle">Delete item?</h2>
+        <p id="confirmDesc"></p>
+        <p class="confirm-note" id="confirmNote" hidden></p>
+        <p class="alert" id="confirmError" data-kind="error" role="alert" hidden></p>
+      </div>
+    </div>
+    <div class="confirm-actions">
+      <button class="btn btn-outline" type="button" id="confirmCancel">Cancel</button>
+      <button class="btn btn-destructive" type="button" id="confirmOk">
+        <span class="btn-spinner" aria-hidden="true"></span>
+        <span id="confirmOkLabel">Delete</span>
+      </button>
+    </div>
+  </dialog>
+
+  <!-- Notifications -->
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
   <!-- IP location pop-up -->
   <dialog class="dialog" id="ipDialog" aria-labelledby="ipDialogTitle">
     <div class="dialog-head">
@@ -349,6 +437,7 @@
   </dialog>
 
   <script src="firebase-config.js"></script>
+  <script src="reactions.js" defer></script>
   <script src="dashboard.js" defer></script>
 </body>
 </html>
