@@ -559,6 +559,100 @@ const submissions = (() => {
   return { start };
 })();
 
+/* ---------- IP location (approximate, from the free GeoJS service) ---------- */
+const MAP_PIN = '<path d="M12 21s-7-6.2-7-11.5A7 7 0 0 1 19 9.5C19 14.8 12 21 12 21Z"/><circle cx="12" cy="9.5" r="2.5"/>';
+
+const ipLocation = (() => {
+  const dialog = document.getElementById("ipDialog");
+  const ipEl = document.getElementById("ipDialogIp");
+  const body = document.getElementById("ipDialogBody");
+  const cache = new Map();
+  let current = "";
+
+  const lookup = (ip) => {
+    if (!cache.has(ip)) {
+      cache.set(ip, fetch(`https://get.geojs.io/v1/ip/geo/${encodeURIComponent(ip)}.json`)
+        .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+        .catch((err) => { cache.delete(ip); throw err; }));
+    }
+    return cache.get(ip);
+  };
+
+  const field = (label, value) => {
+    const row = el("div", "geo-row");
+    row.append(el("dt", "", label), el("dd", "", value || "—"));
+    return row;
+  };
+
+  const show = (ip, visit, g) => {
+    const lat = parseFloat(g.latitude);
+    const lon = parseFloat(g.longitude);
+    const hasPoint = Number.isFinite(lat) && Number.isFinite(lon);
+    const place2 = [g.city, g.region, g.country].filter(Boolean).join(", ");
+
+    const head = el("div", "geo-place");
+    head.append(svg(MAP_PIN), el("strong", "", place2 || "Location unknown"));
+
+    const list = el("dl", "geo-list");
+    list.append(
+      field("City", g.city),
+      field("Region", g.region),
+      field("Country", g.country ? `${g.country}${g.country_code ? ` (${g.country_code})` : ""}` : ""),
+      field("Network", g.organization_name || g.organization),
+      field("Time zone", g.timezone),
+      field("Device", visit.device),
+      field("Accuracy", g.accuracy ? `about ${g.accuracy} km` : "")
+    );
+
+    const parts = [head];
+    if (hasPoint) {
+      // OpenStreetMap preview around the point
+      const d = 0.08;
+      const map = el("iframe", "geo-map");
+      map.title = `Map near ${place2 || ip}`;
+      map.referrerPolicy = "no-referrer";
+      map.src = `https://www.openstreetmap.org/export/embed.html?bbox=${lon - d},${lat - d},${lon + d},${lat + d}&layer=mapnik&marker=${lat},${lon}`;
+      parts.push(map);
+    }
+    parts.push(list);
+
+    const note = el("p", "geo-note", "Approximate: an IP shows roughly where the internet provider connects (often the city), not an exact address.");
+    parts.push(note);
+
+    if (hasPoint) {
+      const actions = el("div", "geo-actions");
+      const gm = el("a", "btn btn-outline btn-sm");
+      gm.href = `https://www.google.com/maps?q=${lat},${lon}`;
+      gm.target = "_blank";
+      gm.rel = "noopener noreferrer";
+      gm.append(svg(MAP_PIN), el("span", "", "Open in Google Maps"));
+      actions.append(gm);
+      parts.push(actions);
+    }
+    body.replaceChildren(...parts);
+  };
+
+  const open = (ip, visit) => {
+    current = ip;
+    ipEl.textContent = ip;
+    body.replaceChildren(el("p", "empty", "Looking up location…"));
+    if (!dialog.open) dialog.showModal();
+    lookup(ip)
+      .then((g) => { if (current === ip) show(ip, visit, g); })
+      .catch((err) => {
+        console.error(err);
+        if (current === ip) body.replaceChildren(el("p", "empty", "Couldn't look up this IP right now. Try again in a moment."));
+      });
+  };
+
+  document.getElementById("ipDialogClose").addEventListener("click", () => dialog.close());
+  // Click outside the box closes it
+  dialog.addEventListener("click", (e) => { if (e.target === dialog) dialog.close(); });
+  dialog.addEventListener("close", () => { current = ""; });
+
+  return { open };
+})();
+
 /* ---------- Loaders per tab ---------- */
 const loaders = {
   overview() {
@@ -700,8 +794,19 @@ const loaders = {
       const ip = el("span", "td-ip", "…");
       getDoc(doc(db, "visitIps", d.id))
         .then((s) => {
-          ip.textContent = s.exists() ? s.data().ip : "—";
-          if (!s.exists()) ip.title = "Recorded before IPs were saved";
+          if (!s.exists()) {
+            ip.textContent = "—";
+            ip.title = "Recorded before IPs were saved";
+            return;
+          }
+          // Click the IP to see roughly where it is
+          const addr = s.data().ip;
+          const b = el("button", "ip-btn");
+          b.type = "button";
+          b.title = "Show location";
+          b.append(el("span", "", addr), svg(MAP_PIN));
+          b.addEventListener("click", () => ipLocation.open(addr, v));
+          ip.replaceChildren(b);
         })
         .catch(() => { ip.textContent = "—"; });
       row.append(

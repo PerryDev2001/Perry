@@ -334,6 +334,20 @@
     </div>
   </div>
 
+  <!-- IP location pop-up -->
+  <dialog class="dialog" id="ipDialog" aria-labelledby="ipDialogTitle">
+    <div class="dialog-head">
+      <div>
+        <h2 id="ipDialogTitle">IP location</h2>
+        <p class="mono" id="ipDialogIp"></p>
+      </div>
+      <button class="btn btn-ghost btn-icon" type="button" id="ipDialogClose" aria-label="Close">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
+      </button>
+    </div>
+    <div class="dialog-body" id="ipDialogBody"></div>
+  </dialog>
+
   <script src="firebase-config.js"></script>
   <script src="dashboard.js" defer></script>
 </body>
