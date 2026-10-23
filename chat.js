@@ -978,10 +978,10 @@ const ensureCommentUser = async () => commentAuth.currentUser || (await signInAn
 
 const explainComment = (err, action) => {
   const code = (err && err.code) || "";
-  if (code === "auth/configuration-not-found") return "Comments need Firebase Authentication (Authentication → Get started, then turn on Anonymous).";
-  if (code === "auth/operation-not-allowed" || code === "auth/admin-restricted-operation") return "Comments need Anonymous sign-in turned on in Firebase (Authentication → Sign-in method).";
+  if (code === "auth/configuration-not-found") return "Likes and comments need Firebase Authentication (Authentication → Get started, then turn on Anonymous).";
+  if (code === "auth/operation-not-allowed" || code === "auth/admin-restricted-operation") return "Likes and comments need Anonymous sign-in turned on in Firebase (Authentication → Sign-in method).";
   if (code === "auth/unauthorized-domain") return `Add "${location.hostname}" in Firebase → Authentication → Settings → Authorized domains.`;
-  if (code === "auth/operation-not-supported-in-this-environment" || location.protocol === "file:") return "Commenting needs the page to be opened from a website (http/https), not as a file.";
+  if (code === "auth/operation-not-supported-in-this-environment" || location.protocol === "file:") return "Likes and comments need the page to be opened from a website (http/https), not as a file.";
   if (code === "permission-denied") return `Couldn't ${action}: the Firestore rules don't allow it yet.`;
   return `Couldn't ${action}. Please try again.`;
 };
@@ -1471,7 +1471,10 @@ const watchLikes = (postId) => {
   st.unsub = onSnapshot(
     query(likesRef, where("post", "==", postId)),
     (snap) => { st.docs = snap.docs; renderLikes(postId); },
-    (err) => console.warn("Likes not loaded:", err.code || err)
+    (err) => {
+      console.warn("Likes not loaded:", err.code || err);
+      window.showToast?.(explainComment(err, "load likes"));
+    }
   );
 };
 
@@ -1512,6 +1515,7 @@ document.addEventListener("click", async (e) => {
     console.error(err);
     btn.setAttribute("aria-pressed", String(wasLiked));
     renderLikes(postId);
+    window.showToast?.(explainComment(err, wasLiked ? "remove your like" : "save your like"));
   } finally {
     likeBusy.delete(postId);
   }

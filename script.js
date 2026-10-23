@@ -748,8 +748,9 @@ const ThemeReveal = {
     el.textContent = text;
     requestAnimationFrame(() => el.classList.add("is-shown"));
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => el.classList.remove("is-shown"), 2200);
+    toastTimer = setTimeout(() => el.classList.remove("is-shown"), text.length > 40 ? 6000 : 2200);
   };
+  window.showToast = toast;
 
   shareBtn.addEventListener("click", async () => {
     const url = location.href.split("#")[0];
