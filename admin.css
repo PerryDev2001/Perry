@@ -790,7 +790,7 @@ h1, h2, h3 { margin: 0; letter-spacing: -0.015em; }
 
 .tr {
   display: grid;
-  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1.1fr) minmax(0, 1.1fr) minmax(0, 0.9fr) minmax(0, 0.9fr);
   align-items: center;
   gap: 12px;
   padding: 12px 24px;
@@ -1065,6 +1065,8 @@ h1, h2, h3 { margin: 0; letter-spacing: -0.015em; }
   }
   .tr .td-device { grid-column: 1 / -1; }
   .tr .td-loc { grid-column: 1 / -1; }
+  .tr .td-ip { grid-column: 1 / -1; }
+  .tr .td-ip::before { content: "IP "; font-family: var(--font, inherit); color: var(--muted-foreground); }
   .tr .td-first::before { content: "First "; }
   .tr .td-last::before { content: "Last "; }
   .pad { padding: 16px; }
@@ -1271,3 +1273,13 @@ button.chip:hover { background: var(--accent); border-color: var(--ring); }
 }
 
 #pinToggle { flex: none; }
+
+/* Visitor IP address */
+.td-ip {
+  overflow: hidden;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12.5px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  user-select: all;
+}

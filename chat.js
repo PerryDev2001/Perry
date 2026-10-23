@@ -131,7 +131,7 @@ const detectDevice = async () => {
 let countryPromise = null;
 const detectCountry = () => {
   if (countryPromise) return countryPromise;
-  // The IP is only used in memory (to make a one-way visitor code); it's never saved anywhere
+  // The IP is saved only in "visitIps", which only admins can read (never shown on the public page)
   countryPromise = fetch("https://get.geojs.io/v1/ip/country.json")
     .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
     .then((d) => ({
@@ -962,30 +962,69 @@ const hashIp = async (ip) => {
 const randomKey = () =>
   "b-" + [...crypto.getRandomValues(new Uint8Array(16))].map((b) => b.toString(16).padStart(2, "0")).join("");
 
-// Each visitor is one document. The key is, in order of preference:
-//  1. the key this browser already used (so a changed IP doesn't create a duplicate)
-//  2. a one-way code of the IP (so other browsers on the same IP don't either)
-//  3. a random key for this browser (if the IP lookup failed)
+// One-way code of things that stay the same for a device (model, screen, time zone, CPU),
+// so the same phone is recognised even in another browser, a private tab or after clearing data
+const deviceFingerprint = async (device) => {
+  if (!(window.crypto && crypto.subtle)) return "";
+  const w = Math.min(screen.width, screen.height);
+  const h = Math.max(screen.width, screen.height);
+  let zone = "";
+  try { zone = Intl.DateTimeFormat().resolvedOptions().timeZone || ""; } catch { /* ignore */ }
+  const traits = [device, `${w}x${h}`, Math.round((window.devicePixelRatio || 1) * 100), screen.colorDepth,
+    zone, navigator.maxTouchPoints || 0, navigator.hardwareConcurrency || 0].join("|");
+  const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(VISITOR_SALT + "fp|" + traits));
+  return [...new Uint8Array(bytes)].slice(0, 16).map((b) => b.toString(16).padStart(2, "0")).join("");
+};
+
+// Robots, link previews, automated/headless browsers and local testing aren't visitors
+const isNotAVisitor = () =>
+  navigator.webdriver === true ||
+  /bot|crawl|spider|slurp|headless|lighthouse|preview|externalhit|vercel|pingdom|uptime/i.test(navigator.userAgent) ||
+  location.protocol === "file:" ||
+  /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
+
+// Each visitor is one document. To find it, in order:
+//  1. the key this browser already used
+//  2. a visit with the same device fingerprint (same phone, new browser / private tab / new IP)
+//  3. a one-way code of the IP, or a random key if the IP lookup failed (a new visitor)
 // A first visit creates the document; later visits only refresh "lastSeen" (at most once a day).
 const recordVisit = async () => {
+  if (isNotAVisitor()) return;
   const today = new Date().toDateString();
   if (store.get("visit-day", "") === today) return;
   try {
     const [device, country] = await Promise.all([detectDevice(), detectCountry()]);
-    const key = store.get("visit-key", "") || (await hashIp(country.ip)) || randomKey();
+    const fp = await deviceFingerprint(device);
+
+    let key = store.get("visit-key", "");
+    if (!key && fp) {
+      const same = await getDocs(query(visitsRef, where("fp", "==", fp), limit(1)));
+      if (!same.empty) key = same.docs[0].id;
+    }
+    if (!key) key = (await hashIp(country.ip)) || randomKey();
     const ref = doc(visitsRef, key);
 
     const existing = await getDoc(ref);
     if (existing.exists()) {
-      await updateDoc(ref, { lastSeen: serverTimestamp() });
+      await updateDoc(ref, fp ? { lastSeen: serverTimestamp(), fp } : { lastSeen: serverTimestamp() });
     } else {
       await setDoc(ref, {
         device: device.slice(0, 40),
         country: country.code,
         countryName: country.name,
+        ...(fp ? { fp } : {}),
         createdAt: serverTimestamp(),
         lastSeen: serverTimestamp(),
       });
+    }
+
+    // IP address: kept in a separate, admin-only collection (the public visitor list never has it)
+    if (country.ip) {
+      try {
+        await setDoc(doc(db, "visitIps", key), { ip: country.ip.slice(0, 45), updatedAt: serverTimestamp() });
+      } catch (err) {
+        console.warn("Visitor IP not saved:", err.code || err);
+      }
     }
 
     store.set("visit-key", key);

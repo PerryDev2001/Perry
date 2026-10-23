@@ -696,8 +696,17 @@ const loaders = {
       const row = el("div", "tr");
       const device = el("div", "td-device");
       device.append(initialAvatar(v.device || "?"), el("span", "", v.device || "Unknown device"));
+      // IP address (admin-only collection, same ID as the visit)
+      const ip = el("span", "td-ip", "…");
+      getDoc(doc(db, "visitIps", d.id))
+        .then((s) => {
+          ip.textContent = s.exists() ? s.data().ip : "—";
+          if (!s.exists()) ip.title = "Recorded before IPs were saved";
+        })
+        .catch(() => { ip.textContent = "—"; });
       row.append(
         device,
+        ip,
         el("span", "td-muted td-loc", place(v.country, v.countryName) || "—"),
         el("span", "td-muted td-first", shortDate(v.createdAt?.toDate?.())),
         el("span", "td-muted td-last", ago(v.lastSeen?.toDate?.()))

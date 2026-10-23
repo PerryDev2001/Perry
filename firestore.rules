@@ -56,14 +56,17 @@ service cloud.firestore {
     }
 
     // Visitors: one document per visitor (keyed by a one-way IP code or a browser key).
+    // "fp" is a one-way code of the device, used to recognise the same device again.
     // Anyone can read the list. A first visit creates the document; later visits may only
-    // refresh lastSeen. Only admins can delete.
+    // refresh lastSeen (and fp). Only admins can delete.
     match /visits/{visitId} {
       allow read: if true;
 
       allow create: if
         visitId.matches('^(ip|b)-[a-f0-9]{16,64}$') &&
-        request.resource.data.keys().hasOnly(['device', 'country', 'countryName', 'createdAt', 'lastSeen']) &&
+        request.resource.data.keys().hasOnly(['device', 'country', 'countryName', 'fp', 'createdAt', 'lastSeen']) &&
+        (!('fp' in request.resource.data) ||
+          (request.resource.data.fp is string && request.resource.data.fp.size() <= 64)) &&
         request.resource.data.keys().hasAll(['device', 'country', 'countryName', 'createdAt', 'lastSeen']) &&
         request.resource.data.device is string &&
         request.resource.data.device.size() <= 40 &&
@@ -75,10 +78,27 @@ service cloud.firestore {
         request.resource.data.lastSeen == request.time;
 
       allow update: if
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastSeen']) &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastSeen', 'fp']) &&
+        (!('fp' in request.resource.data) ||
+          (request.resource.data.fp is string && request.resource.data.fp.size() <= 64)) &&
         request.resource.data.lastSeen == request.time;
 
       allow delete: if isAdmin();
+    }
+
+    // Visitor IP addresses: private. Only admins can read them. Each visit saves its own
+    // (the document ID is the visit's), and only for a visit that exists.
+    match /visitIps/{visitId} {
+      allow read, delete: if isAdmin();
+
+      allow create, update: if
+        exists(/databases/$(database)/documents/visits/$(visitId)) &&
+        request.resource.data.keys().hasOnly(['ip', 'updatedAt']) &&
+        request.resource.data.keys().hasAll(['ip', 'updatedAt']) &&
+        request.resource.data.ip is string &&
+        request.resource.data.ip.size() > 0 &&
+        request.resource.data.ip.size() <= 45 &&
+        request.resource.data.updatedAt == request.time;
     }
 
     // Comments on the pinned post, any post, or an approved visitor post: anyone can read. Posting needs an (anonymous) sign-in;
