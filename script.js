@@ -22,6 +22,28 @@ const ThemeReveal = {
   },
 };
 
+/* ---------- Profile text from the last visit ---------- */
+// The name, role and bio live in Firestore. Until it answers, show what this browser saw last
+// time (first-time visitors see a short shimmer where the role goes).
+(() => {
+  let p = null;
+  try { p = JSON.parse(localStorage.getItem("site-profile") || "null"); } catch { /* ignore */ }
+  if (!p || typeof p !== "object") return;
+  const set = (sel, text) => { for (const n of document.querySelectorAll(sel)) n.textContent = text; };
+  if (p.name) {
+    set(".brand-text strong, #name, .post-author, [data-profile-name]", p.name);
+    document.title = p.role ? `${p.name} — ${p.role}` : p.name;
+  }
+  set("[data-role]", p.role || "");
+  for (const n of document.querySelectorAll("[data-role]")) (n.closest(".intro-list li") || n).hidden = !p.role;
+  if (typeof p.bio === "string") {
+    set(".bio p", p.bio);
+    set(".bio cite", p.bioRef || "");
+    const pinned = document.querySelector("#pinnedPost .post-text");
+    if (pinned) pinned.textContent = p.bioRef ? `${p.bio} — ${p.bioRef}` : p.bio;
+  }
+})();
+
 /* ---------- Theme ---------- */
 (() => {
   const root = document.documentElement;

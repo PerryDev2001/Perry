@@ -1924,7 +1924,7 @@ document.addEventListener("click", (e) => {
 /* ---------- Profile + posts managed from the admin dashboard ---------- */
 const DEFAULT_PROFILE = {
   name: "Perry Philip Lozano",
-  role: "Software Developer",
+  role: "",
   bio: "“Commit your work to the LORD, and your plans will be established.”",
   bioRef: "Proverbs 16:3",
 };
@@ -1941,8 +1941,7 @@ const applyProfile = (p) => {
 
   document.title = role ? `${name} — ${role}` : name;
   setText(".brand-text strong, #name, .post-author, [data-profile-name]", name);
-  setText(".brand-text small, .profile-role", role);
-  setText(".intro-list li:first-child strong", role);
+  setText("[data-role]", role);
   setText(".bio p", bio);
   setText(".bio cite", bioRef);
   setText("#chatTitle", `Chat with ${first}`);
@@ -1950,15 +1949,20 @@ const applyProfile = (p) => {
   const pinned = document.querySelector(".post:not(.dyn-post) .post-text");
   if (pinned) pinned.textContent = bioRef ? `${bio} — ${bioRef}` : bio;
 
-  for (const sel of [".brand-text small", ".profile-role"]) {
-    for (const n of document.querySelectorAll(sel)) n.hidden = !role;
-  }
+  // No role set: hide its spots (the Intro line too)
+  for (const n of document.querySelectorAll("[data-role]")) (n.closest(".intro-list li") || n).hidden = !role;
+
+  // Remember it, so the next visit shows the right text straight away
+  store.set("site-profile", { name, role, bio, bioRef });
 };
 
 onSnapshot(
   doc(db, "site", "profile"),
-  (snap) => { if (snap.exists()) applyProfile(snap.data()); },
-  (err) => console.warn("Profile not loaded:", err.code || err)
+  (snap) => applyProfile(snap.exists() ? snap.data() : {}),
+  (err) => {
+    console.warn("Profile not loaded:", err.code || err);
+    applyProfile(store.get("site-profile", {}));
+  }
 );
 
 // Posts (newest first) above the pinned post

@@ -3409,3 +3409,26 @@ html.theme-switching .switch-knob {
 /* Unpinned: no "Pinned" label */
 .post.is-unpinned .pin-label { display: none; }
 .pin-label { display: inline-flex; align-items: center; gap: 4px; }
+
+/* Role text loads from Firestore: shimmer until it arrives */
+[data-role]:empty:not([hidden]) {
+  display: inline-block;
+  min-width: 120px;
+  min-height: 1em;
+  vertical-align: middle;
+  color: transparent;
+  background: linear-gradient(90deg, var(--inset) 25%, var(--hover) 50%, var(--inset) 75%);
+  background-size: 200% 100%;
+  border-radius: 999px;
+  animation: roleShimmer 1.2s ease-in-out infinite;
+}
+
+.profile-role[data-role]:empty:not([hidden]) { min-height: 32px; min-width: 150px; }
+
+@keyframes roleShimmer {
+  from { background-position: 100% 0; }
+  to { background-position: -100% 0; }
+}
+
+[data-role][hidden],
+.intro-list li[hidden] { display: none !important; }
