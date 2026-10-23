@@ -24,7 +24,7 @@ const auth = A.getAuth();
 const db = F.getFirestore();
 const {
   collection, doc, getDoc, setDoc, addDoc, deleteDoc, query, orderBy, limit, startAfter,
-  getDocs, onSnapshot, serverTimestamp, getCountFromServer, where,
+  getDocs, onSnapshot, serverTimestamp, getCountFromServer, where, updateDoc,
 } = F;
 
 /* ---------- Helpers ---------- */
@@ -183,7 +183,7 @@ document.getElementById("sidebarClose").addEventListener("click", closeMenu);
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeMenu(); });
 
 /* ---------- Tabs (#overview, #posts, …) ---------- */
-const TITLES = { overview: "Overview", posts: "Posts", messages: "Messages", comments: "Comments", visitors: "Visitors", profile: "Profile" };
+const TITLES = { overview: "Overview", posts: "Posts", messages: "Messages", submissions: "Anonymous posts", comments: "Comments", visitors: "Visitors", profile: "Profile" };
 const loaded = new Set();
 
 const showTab = () => {
@@ -462,6 +462,103 @@ const chat = (() => {
   };
 })();
 
+/* ---------- Anonymous posts: visitors' posts waiting for approval ---------- */
+const CHECK = '<path d="m5 12.5 4.5 4.5L19 7.5"/>';
+const EYE_OFF = '<path d="M3 3l18 18M10.6 10.6a2 2 0 0 0 2.8 2.8M9.9 5.1A10 10 0 0 1 12 5c6.4 0 10 7 10 7a17 17 0 0 1-3.2 4.1M6.6 6.6A17 17 0 0 0 2 12s3.6 7 10 7a9.7 9.7 0 0 0 5.4-1.6"/>';
+
+const submissions = (() => {
+  const listEl = document.getElementById("submissionList");
+  const navBadge = document.getElementById("navSubmissions");
+  const pendingCount = document.getElementById("subPendingCount");
+  const approvedCount = document.getElementById("subApprovedCount");
+  const segBtns = [...document.querySelectorAll("[data-filter]")];
+  let filter = "pending";
+  let docs = [];
+  let started = false;
+
+  const time = (d) => d.data().createdAt?.toDate?.()?.getTime?.() || 0;
+
+  const statusButton = (d, status, label, icon, cls) => {
+    const b = el("button", `btn btn-sm ${cls}`);
+    b.type = "button";
+    b.append(svg(icon), el("span", "", label));
+    b.addEventListener("click", async () => {
+      b.disabled = true;
+      try {
+        await updateDoc(d.ref, { status, reviewedAt: serverTimestamp() });
+      } catch (err) {
+        console.error(err);
+        b.disabled = false;
+        alert(errText(err, "update the post"));
+      }
+    });
+    return b;
+  };
+
+  const row = (d) => {
+    const v = d.data();
+    const approved = v.status === "approved";
+    const li = el("li", "row");
+    li.append(initialAvatar(v.name || "Anonymous"));
+    const main = el("div", "row-main");
+    const head = el("div", "row-head");
+    head.append(el("strong", "", v.name || "Anonymous"));
+    const sub = [v.device, place(v.country, v.countryName)].filter(Boolean).join(" · ");
+    if (sub) head.append(el("span", "muted", sub));
+    head.append(el("span", `badge ${approved ? "badge-brand" : "badge-warn"}`, approved ? "Approved" : "Pending"));
+    main.append(head, el("p", "row-body", v.text || ""), el("span", "row-time", fullDate(v.createdAt?.toDate?.())));
+    li.append(main);
+
+    const actions = el("div", "row-actions row-actions-stack");
+    actions.append(approved
+      ? statusButton(d, "pending", "Unpublish", EYE_OFF, "btn-outline")
+      : statusButton(d, "approved", "Approve", CHECK, "btn-primary"));
+    actions.append(deleteButton({ onConfirm: async () => { await deleteDoc(d.ref); } }));
+    li.append(actions);
+    return li;
+  };
+
+  const render = () => {
+    const pending = docs.filter((d) => d.data().status !== "approved");
+    const approved = docs.filter((d) => d.data().status === "approved");
+    pendingCount.textContent = pending.length.toLocaleString();
+    approvedCount.textContent = approved.length.toLocaleString();
+    navBadge.textContent = pending.length > 99 ? "99+" : String(pending.length);
+    navBadge.hidden = !pending.length;
+    const shown = filter === "approved" ? approved : pending;
+    listEl.replaceChildren(...(shown.length
+      ? shown.map(row)
+      : [el("li", "empty", filter === "approved" ? "No approved posts yet." : "No posts waiting for review.")]));
+  };
+
+  for (const b of segBtns) {
+    b.addEventListener("click", () => {
+      filter = b.dataset.filter;
+      for (const x of segBtns) {
+        const on = x === b;
+        x.classList.toggle("is-active", on);
+        x.setAttribute("aria-selected", String(on));
+      }
+      render();
+    });
+  }
+
+  const start = () => {
+    if (started) return;
+    started = true;
+    onSnapshot(
+      collection(db, "submissions"),
+      (snap) => { docs = snap.docs.slice().sort((a, b) => time(b) - time(a)); render(); },
+      (err) => {
+        console.error(err);
+        listEl.replaceChildren(el("li", "empty", errText(err, "load anonymous posts")));
+      }
+    );
+  };
+
+  return { start };
+})();
+
 /* ---------- Loaders per tab ---------- */
 const loaders = {
   overview() {
@@ -475,6 +572,10 @@ const loaders = {
 
   messages() {
     chat.start();
+  },
+
+  submissions() {
+    submissions.start();
   },
 
   comments() {
@@ -567,7 +668,18 @@ const loaders = {
       } catch (err) {
         console.error(err);
       }
-      wrap.replaceChildren(...posts.map(group));
+      try {
+        const subs = await getDocs(query(collection(db, "submissions"), where("status", "==", "approved")));
+        for (const d of subs.docs) {
+          const v = d.data();
+          posts.push({ id: d.id, text: `${v.name || "Anonymous"}: ${v.text}`, date: v.createdAt?.toDate?.() });
+        }
+      } catch (err) {
+        console.error(err);
+      }
+      const [pinned, ...rest] = posts;
+      rest.sort((a, b) => (b.date?.getTime?.() || 0) - (a.date?.getTime?.() || 0));
+      wrap.replaceChildren(...[pinned, ...rest].map(group));
     })();
   },
 
@@ -595,6 +707,45 @@ const loaders = {
   }),
 
   posts() {
+    // Pinned post: pin / unpin (saved in site/pinned; missing means pinned)
+    const PIN = '<path d="M9 4h6l-1 6 3 3v2H7v-2l3-3-1-6ZM12 15v6"/>';
+    const UNPIN = '<path d="M9 4h6l-1 6 3 3v2H7v-2l3-3-1-6ZM12 15v6M3 3l18 18"/>';
+    const pinRef = doc(db, "site", "pinned");
+    const pinBtn = document.getElementById("pinToggle");
+    const pinState = document.getElementById("pinnedState");
+    const pinText = document.getElementById("pinnedText");
+    const pinBadge = document.getElementById("pinnedBadge");
+    let isPinned = true;
+
+    loadProfile().then((p) => { pinText.textContent = p.bioRef ? `${p.bio} — ${p.bioRef}` : p.bio; });
+
+    onSnapshot(
+      pinRef,
+      (snap) => {
+        isPinned = !snap.exists() || snap.data().pinned !== false;
+        pinBtn.disabled = false;
+        pinBtn.replaceChildren(svg(isPinned ? UNPIN : PIN), el("span", "", isPinned ? "Unpin" : "Pin to top"));
+        pinState.textContent = isPinned
+          ? "Shown at the top of your page, above every other post."
+          : "Unpinned: shown as a normal post, below your other posts.";
+        pinBadge.textContent = isPinned ? "Pinned" : "Not pinned";
+        pinBadge.className = `badge ${isPinned ? "badge-brand" : "badge-muted"}`;
+      },
+      (err) => { pinState.textContent = errText(err, "load the pinned setting"); }
+    );
+
+    pinBtn.addEventListener("click", async () => {
+      pinBtn.disabled = true;
+      try {
+        await setDoc(pinRef, { pinned: !isPinned, updatedAt: serverTimestamp() });
+      } catch (err) {
+        console.error(err);
+        alert(errText(err, isPinned ? "unpin the post" : "pin the post"));
+      } finally {
+        pinBtn.disabled = false;
+      }
+    });
+
     const listEl = document.getElementById("postList");
     const countEl = document.getElementById("postCount");
     onSnapshot(
@@ -728,6 +879,7 @@ pf.form.addEventListener("submit", async (e) => {
 /* ---------- Start ---------- */
 loadProfile().then(applySide);
 chat.start();            // live badge for new messages, even on other tabs
+submissions.start();     // live badge for posts waiting for review
 window.addEventListener("hashchange", showTab);
 showTab();
 })();

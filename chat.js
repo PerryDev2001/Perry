@@ -484,6 +484,103 @@ document.addEventListener("pointerdown", (e) => {
   if (pickerOpen() && !picker.contains(e.target) && !emojiBtn.contains(e.target)) closePicker();
 });
 
+// The same picker for any other text box (comments, posts). Shares the "Recent" list.
+const SMILEY_SVG = '<svg class="icon icon-fill" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm-3.5 7a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3Zm7 0a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3ZM12 18a5.5 5.5 0 0 1-5-3.2h10A5.5 5.5 0 0 1 12 18Z"/></svg>';
+
+const buildEmojiPicker = ({ input, max }) => {
+  const toggle = el("button", "chat-emoji-btn");
+  toggle.type = "button";
+  toggle.setAttribute("aria-label", "Add emoji");
+  toggle.setAttribute("aria-expanded", "false");
+  toggle.innerHTML = SMILEY_SVG;   // fixed markup
+
+  const box = el("div", "emoji-picker inline-emoji-picker");
+  box.setAttribute("role", "dialog");
+  box.setAttribute("aria-label", "Choose an emoji");
+  box.hidden = true;
+  const tabs = el("div", "emoji-tabs");
+  tabs.setAttribute("role", "tablist");
+  const grid = el("div", "emoji-grid");
+  box.append(tabs, grid);
+
+  let cat = EMOJI[0].list.length ? 0 : 1;
+  const drawTabs = () => {
+    tabs.replaceChildren(...EMOJI.map((cg, i) => {
+      const t = el("button", "emoji-tab", cg.icon);
+      t.type = "button";
+      t.setAttribute("role", "tab");
+      t.setAttribute("aria-label", cg.label);
+      t.setAttribute("aria-selected", String(i === cat));
+      t.dataset.cat = i;
+      return t;
+    }));
+  };
+  const drawGrid = () => {
+    const cg = EMOJI[cat];
+    grid.setAttribute("aria-label", cg.label);
+    if (!cg.list.length) {
+      grid.replaceChildren(el("p", "emoji-empty", "Emoji you use will show up here."));
+      return;
+    }
+    grid.replaceChildren(...cg.list.map((emoji) => {
+      const b = el("button", "emoji", emoji);
+      b.type = "button";
+      b.setAttribute("aria-label", emoji);
+      return b;
+    }));
+  };
+  const isOpen = () => !box.hidden;
+  const open = () => {
+    if (EMOJI[0].list.length && !box.dataset.seen) cat = 0;
+    box.dataset.seen = "1";
+    drawTabs();
+    drawGrid();
+    box.hidden = false;
+    void box.offsetWidth;
+    box.classList.add("is-open");
+    toggle.setAttribute("aria-expanded", "true");
+    toggle.classList.add("is-active");
+  };
+  const close = () => {
+    box.classList.remove("is-open");
+    box.hidden = true;
+    toggle.setAttribute("aria-expanded", "false");
+    toggle.classList.remove("is-active");
+  };
+
+  toggle.addEventListener("click", () => {
+    if (isOpen()) close(); else open();
+    if (matchMedia("(hover: hover)").matches) input.focus();
+  });
+  tabs.addEventListener("click", (e) => {
+    const t = e.target.closest(".emoji-tab");
+    if (!t) return;
+    cat = +t.dataset.cat;
+    drawTabs();
+    drawGrid();
+    grid.scrollTop = 0;
+  });
+  grid.addEventListener("click", (e) => {
+    const b = e.target.closest(".emoji");
+    if (!b) return;
+    const emoji = b.textContent;
+    const start = input.selectionStart ?? input.value.length;
+    const end = input.selectionEnd ?? input.value.length;
+    const next = input.value.slice(0, start) + emoji + input.value.slice(end);
+    if (next.length > max) return;
+    input.value = next;
+    input.setSelectionRange(start + emoji.length, start + emoji.length);
+    input.dispatchEvent(new Event("input"));
+    remember(emoji);
+    b.animate([{ transform: "scale(1.35)" }, { transform: "scale(1)" }], { duration: 250, easing: "ease-out" });
+  });
+  document.addEventListener("pointerdown", (e) => {
+    if (isOpen() && !box.contains(e.target) && !toggle.contains(e.target)) close();
+  });
+
+  return { toggle, picker: box, close };
+};
+
 /* ---------- Composer state: counter + send button ---------- */
 const countEl = document.getElementById("chatCount");
 const composeEl = document.getElementById("chatCompose");
@@ -1044,21 +1141,11 @@ const buildCommentSection = (postId) => {
   send.setAttribute("aria-label", "Post comment");
   send.append(commentIcon('<path d="M3.4 20.4 21 12 3.4 3.6 3.4 10l12.6 2-12.6 2Z"/>', "icon icon-fill"));
   // Emoji picker, the same as the chat's
-  const emojiToggle = el("button", "chat-emoji-btn comment-emoji-btn");
-  emojiToggle.type = "button";
-  emojiToggle.setAttribute("aria-label", "Add emoji");
-  emojiToggle.setAttribute("aria-expanded", "false");
-  emojiToggle.append(commentIcon('<path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm-3.5 7a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3Zm7 0a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3ZM12 18a5.5 5.5 0 0 1-5-3.2h10A5.5 5.5 0 0 1 12 18Z"/>', "icon icon-fill"));
-  compose.append(text, emojiToggle, chars, send);
-  const emojiPicker = el("div", "emoji-picker comment-emoji-picker");
-  emojiPicker.setAttribute("role", "dialog");
-  emojiPicker.setAttribute("aria-label", "Choose an emoji");
-  emojiPicker.hidden = true;
-  const emojiTabs = el("div", "emoji-tabs");
-  emojiTabs.setAttribute("role", "tablist");
-  const emojiGrid = el("div", "emoji-grid");
-  emojiPicker.append(emojiTabs, emojiGrid);
-  box.append(nameRow, emojiPicker, compose);
+  const emoji = buildEmojiPicker({ input: text, max: MAX_COMMENT });
+  emoji.toggle.classList.add("comment-emoji-btn");
+  emoji.picker.classList.add("comment-emoji-picker");
+  compose.append(text, emoji.toggle, chars, send);
+  box.append(nameRow, emoji.picker, compose);
   form.append(me, box);
 
   const status = el("p", "comment-status");
@@ -1066,7 +1153,7 @@ const buildCommentSection = (postId) => {
   status.hidden = true;
 
   section.append(head, more, list, form, status);
-  return { section, badge, more, list, form, me, nameInput: nameInput2, text, chars, send, status, emojiToggle, emojiPicker, emojiTabs, emojiGrid };
+  return { section, badge, more, list, form, me, nameInput: nameInput2, text, chars, send, status, emoji };
 };
 
 /* ---------- Post dialog: comments and "liked by" open in a pop-up ---------- */
@@ -1362,81 +1449,6 @@ const createThread = (postId) => {
     if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); ui.form.requestSubmit(); }
   });
 
-  // Emoji picker (same categories and "Recent" list as the chat)
-  let cat = EMOJI[0].list.length ? 0 : 1;
-  const drawTabs = () => {
-    ui.emojiTabs.replaceChildren(...EMOJI.map((c, i) => {
-      const t = el("button", "emoji-tab", c.icon);
-      t.type = "button";
-      t.setAttribute("role", "tab");
-      t.setAttribute("aria-label", c.label);
-      t.setAttribute("aria-selected", String(i === cat));
-      t.dataset.cat = i;
-      return t;
-    }));
-  };
-  const drawGrid = () => {
-    const c = EMOJI[cat];
-    ui.emojiGrid.setAttribute("aria-label", c.label);
-    if (!c.list.length) {
-      ui.emojiGrid.replaceChildren(el("p", "emoji-empty", "Emoji you use will show up here."));
-      return;
-    }
-    ui.emojiGrid.replaceChildren(...c.list.map((emoji) => {
-      const b = el("button", "emoji", emoji);
-      b.type = "button";
-      b.setAttribute("aria-label", emoji);
-      return b;
-    }));
-  };
-  const emojiOpen = () => !ui.emojiPicker.hidden;
-  const openEmoji = () => {
-    if (EMOJI[0].list.length && !ui.emojiPicker.dataset.seen) cat = 0;
-    ui.emojiPicker.dataset.seen = "1";
-    drawTabs();
-    drawGrid();
-    ui.emojiPicker.hidden = false;
-    void ui.emojiPicker.offsetWidth;
-    ui.emojiPicker.classList.add("is-open");
-    ui.emojiToggle.setAttribute("aria-expanded", "true");
-    ui.emojiToggle.classList.add("is-active");
-  };
-  const closeEmoji = () => {
-    ui.emojiPicker.classList.remove("is-open");
-    ui.emojiPicker.hidden = true;
-    ui.emojiToggle.setAttribute("aria-expanded", "false");
-    ui.emojiToggle.classList.remove("is-active");
-  };
-  ui.emojiToggle.addEventListener("click", () => {
-    if (emojiOpen()) closeEmoji(); else openEmoji();
-    if (matchMedia("(hover: hover)").matches) ui.text.focus();
-  });
-  ui.emojiTabs.addEventListener("click", (e) => {
-    const t = e.target.closest(".emoji-tab");
-    if (!t) return;
-    cat = +t.dataset.cat;
-    drawTabs();
-    drawGrid();
-    ui.emojiGrid.scrollTop = 0;
-  });
-  ui.emojiGrid.addEventListener("click", (e) => {
-    const b = e.target.closest(".emoji");
-    if (!b) return;
-    const emoji = b.textContent;
-    const start = ui.text.selectionStart ?? ui.text.value.length;
-    const end = ui.text.selectionEnd ?? ui.text.value.length;
-    const next = ui.text.value.slice(0, start) + emoji + ui.text.value.slice(end);
-    if (next.length > MAX_COMMENT) return;
-    ui.text.value = next;
-    ui.text.setSelectionRange(start + emoji.length, start + emoji.length);
-    grow();
-    remember(emoji);
-    b.animate([{ transform: "scale(1.35)" }, { transform: "scale(1)" }], { duration: 250, easing: "ease-out" });
-  });
-  document.addEventListener("pointerdown", (e) => {
-    if (emojiOpen() && !ui.emojiPicker.contains(e.target) && !ui.emojiToggle.contains(e.target)) closeEmoji();
-  });
-
   ui.form.addEventListener("submit", async (e) => {
     e.preventDefault();
     const t = ui.text.value.replace(/\s+\n/g, "\n").trim().slice(0, MAX_COMMENT);
@@ -1462,7 +1474,7 @@ const createThread = (postId) => {
         createdAt: serverTimestamp(),
       });
       lastComment = Date.now();
-      closeEmoji();
+      ui.emoji.close();
       ui.text.value = "";
       setStatus2("");
     } catch (err) {
@@ -1490,7 +1502,7 @@ const createThread = (postId) => {
         key: `comments:${postId}`,
         label: "Comments",
         content: ui.section,
-        onClose: () => { mark(false); closeEmoji(); editingId = null; confirmingId = null; setStatus2(""); },
+        onClose: () => { mark(false); ui.emoji.close(); editingId = null; confirmingId = null; setStatus2(""); },
       });
       mark(true);
       render();
@@ -1746,6 +1758,169 @@ document.addEventListener("click", async (e) => {
 
 watchLikes("pinned");
 
+/* ---------- Visitor posts: anyone can post; the admin approves them first ---------- */
+// Saved in "submissions" as "pending". Only approved ones are shown (firestore.rules agree).
+const submissionsRef = collection(db, "submissions");
+const MAX_POST = 1000;
+const POST_COOLDOWN_MS = 60 * 1000;
+
+const composer = (() => {
+  const wrap = el("section", "composer-sheet");
+  wrap.setAttribute("aria-label", "Create post");
+
+  const head = el("div", "comments-head");
+  head.append(el("h3", "comments-title", "Create post"));
+  const note = el("p", "composer-note");
+  note.append(commentIcon('<path d="M12 3 4 6v6c0 4.5 3.4 8.3 8 9 4.6-.7 8-4.5 8-9V6l-8-3Z"/><path d="m9 12 2 2 4-4"/>'),
+    el("span", "", "Posts are reviewed before they appear on the page."));
+
+  const form = el("form", "composer-form");
+  form.noValidate = true;
+  form.autocomplete = "off";
+
+  // Name (required)
+  const nameField = el("label", "composer-field");
+  const nameLabel = el("span", "composer-label", "Name");
+  nameLabel.append(el("span", "composer-req", " *"));
+  const nameIn = el("input", "composer-input");
+  nameIn.type = "text";
+  nameIn.maxLength = MAX_NAME;
+  nameIn.required = true;
+  nameIn.placeholder = "Your name";
+  nameIn.autocomplete = "nickname";
+  nameField.append(nameLabel, nameIn);
+
+  // Caption (required) with the emoji picker
+  const capField = el("div", "composer-field");
+  const capLabel = el("label", "composer-label", "Caption");
+  capLabel.append(el("span", "composer-req", " *"));
+  capLabel.htmlFor = "composerCaption";
+  const capBox = el("div", "composer-caption");
+  const cap = el("textarea", "composer-textarea");
+  cap.id = "composerCaption";
+  cap.rows = 4;
+  cap.maxLength = MAX_POST;
+  cap.required = true;
+  cap.placeholder = "What's on your mind?";
+  const emoji = buildEmojiPicker({ input: cap, max: MAX_POST });
+  emoji.picker.classList.add("composer-emoji-picker");
+  const capFoot = el("div", "composer-caption-foot");
+  const count = el("span", "composer-count", `0 / ${MAX_POST}`);
+  capFoot.append(emoji.toggle, count);
+  capBox.append(cap, capFoot);
+  capField.append(capLabel, emoji.picker, capBox);
+
+  const status = el("p", "comment-status composer-status");
+  status.setAttribute("role", "status");
+  status.hidden = true;
+
+  const submit = el("button", "btn btn-primary composer-submit");
+  submit.type = "submit";
+  submit.append(commentIcon('<path d="M3.4 20.4 21 12 3.4 3.6 3.4 10l12.6 2-12.6 2Z"/>', "icon icon-fill"), el("span", "", "Submit for review"));
+  form.append(nameField, capField, status, submit);
+
+  // "Sent" state
+  const done = el("div", "composer-done");
+  done.hidden = true;
+  const doneIcon = el("span", "composer-done-icon");
+  doneIcon.append(commentIcon('<path d="m5 12.5 4.5 4.5L19 7.5"/>'));
+  const doneTitle = el("h4", "", "Sent for review");
+  const doneText = el("p", "");
+  const doneBtn = el("button", "btn btn-secondary", "Close");
+  doneBtn.type = "button";
+  done.append(doneIcon, doneTitle, doneText, doneBtn);
+
+  wrap.append(head, note, form, done);
+
+  const setStatus = (t) => { status.textContent = t; status.hidden = !t; };
+  const showCount = () => {
+    count.textContent = `${cap.value.length} / ${MAX_POST}`;
+    count.classList.toggle("is-low", MAX_POST - cap.value.length <= 50);
+  };
+  const grow = () => {
+    cap.style.height = "auto";
+    cap.style.height = `${Math.min(Math.max(cap.scrollHeight, 104), 260)}px`;
+  };
+  cap.addEventListener("input", () => { showCount(); grow(); cap.removeAttribute("aria-invalid"); setStatus(""); });
+  nameIn.addEventListener("input", () => { nameIn.removeAttribute("aria-invalid"); setStatus(""); });
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const name = nameIn.value.trim().slice(0, MAX_NAME);
+    const text = cap.value.replace(/[ \t]+\n/g, "\n").trim().slice(0, MAX_POST);
+    if (!name) { nameIn.setAttribute("aria-invalid", "true"); setStatus("Please enter your name."); nameIn.focus(); return; }
+    if (!text) { cap.setAttribute("aria-invalid", "true"); setStatus("Please write a caption."); cap.focus(); return; }
+    const wait = POST_COOLDOWN_MS - (Date.now() - store.get("post-last", 0));
+    if (wait > 0) { setStatus(`Please wait ${Math.ceil(wait / 1000)}s before posting again.`); return; }
+
+    submit.disabled = true;
+    setStatus("");
+    try {
+      const [u, device, country] = await Promise.all([ensureCommentUser(), detectDevice(), detectCountry()]);
+      await addDoc(submissionsRef, {
+        name,
+        text,
+        uid: u.uid,
+        device: device.slice(0, 40),
+        country: country.code,
+        countryName: country.name,
+        status: "pending",
+        createdAt: serverTimestamp(),
+      });
+      store.set("post-last", Date.now());
+      store.set("chat-name", name);
+      emoji.close();
+      cap.value = "";
+      showCount();
+      grow();
+      const first = (siteProfile.name || "").split(/\s+/)[0] || "the owner";
+      doneText.textContent = `Thanks, ${name}! Your post will show on the page once ${first} approves it.`;
+      form.hidden = true;
+      note.hidden = true;
+      done.hidden = false;
+      doneBtn.focus({ preventScroll: true });
+    } catch (err) {
+      console.error(err);
+      setStatus(explainComment(err, "send your post"));
+    } finally {
+      submit.disabled = false;
+    }
+  });
+
+  doneBtn.addEventListener("click", () => postDialog.hide());
+
+  const open = () => {
+    form.hidden = false;
+    note.hidden = false;
+    done.hidden = true;
+    setStatus("");
+    if (!nameIn.value) nameIn.value = store.get("chat-name", "");
+    showCount();
+    postDialog.show({ key: "composer", label: "Create post", content: wrap, onClose: () => emoji.close() });
+    grow();
+    if (!matchMedia("(pointer: coarse)").matches) (nameIn.value ? cap : nameIn).focus({ preventScroll: true });
+  };
+
+  return { open };
+})();
+
+// "Create post" card on the page
+document.addEventListener("click", (e) => {
+  if (e.target.closest("[data-open-composer]")) composer.open();
+});
+{
+  const me = document.getElementById("composerMe");
+  const showMe = () => {
+    if (!me) return;
+    const n = store.get("chat-name", "") || "?";
+    me.textContent = [...n][0].toUpperCase();
+    me.style.setProperty("--h", hueFor(n));
+  };
+  showMe();
+  window.addEventListener("storage", showMe);
+  document.addEventListener("change", (e) => { if (e.target.matches?.(".composer-input, .chat-name, .comment-name")) setTimeout(showMe); });
+}
+
 /* ---------- Profile + posts managed from the admin dashboard ---------- */
 const DEFAULT_PROFILE = {
   name: "Perry Philip Lozano",
@@ -1795,23 +1970,38 @@ const postDate = (date) => {
     " at " + date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 };
 
-const renderPost = (d) => {
+const renderPost = (d, kind = "admin") => {
   const p = d.data({ serverTimestamps: "estimate" });
   const date = p.createdAt?.toDate?.();
 
-  const article = el("article", "card post dyn-post");
+  const visitor = kind === "community";
+  const article = el("article", `card post dyn-post${visitor ? " is-community" : ""}`);
   const head = el("header", "post-head");
-  const avatar = el("img", "post-avatar");
-  avatar.src = document.querySelector(".profile-avatar")?.getAttribute("src") || "img/ppl.jpg";
-  avatar.alt = "";
-  avatar.width = 40;
-  avatar.height = 40;
+  let avatar;
+  if (visitor) {
+    // Visitor posts: a letter avatar in the name's colour
+    const n = p.name || "Anonymous";
+    avatar = el("span", "post-avatar post-avatar-letter", [...n][0].toUpperCase());
+    avatar.style.setProperty("--h", hueFor(n));
+    avatar.setAttribute("aria-hidden", "true");
+  } else {
+    avatar = el("img", "post-avatar");
+    avatar.src = document.querySelector(".profile-avatar")?.getAttribute("src") || "img/ppl.jpg";
+    avatar.alt = "";
+    avatar.width = 40;
+    avatar.height = 40;
+  }
   const who = el("div");
   const meta = el("p", "post-meta");
   const time = el("time", "", relTime(date) === "now" ? "Just now" : postDate(date));
   if (date) { time.dateTime = date.toISOString(); time.title = date.toLocaleString(); }
   meta.append(time);
-  who.append(el("p", "post-author", siteProfile.name), meta);
+  if (visitor) {
+    const tag = el("span", "post-tag");
+    tag.append(commentIcon('<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8"/>'), el("span", "", "Community"));
+    meta.append(" · ", tag);
+  }
+  who.append(el("p", "post-author", visitor ? (p.name || "Anonymous") : siteProfile.name), meta);
   head.append(avatar, who);
 
   article.append(head, el("p", "post-text", p.text));
@@ -1848,11 +2038,51 @@ const renderPost = (d) => {
 };
 
 if (postsFeed) {
+  let adminPosts = [];
+  let visitorPosts = [];
+  const stamp = (d) => {
+    const ts = d.data({ serverTimestamps: "estimate" }).createdAt;
+    return ts?.toMillis?.() ?? ts?.toDate?.()?.getTime?.() ?? 0;
+  };
+  const drawFeed = () => {
+    const items = [
+      ...adminPosts.map((d) => ({ d, kind: "admin" })),
+      ...visitorPosts.map((d) => ({ d, kind: "community" })),
+    ].sort((a, b) => stamp(b.d) - stamp(a.d));
+    postsFeed.replaceChildren(...items.map(({ d, kind }) => renderPost(d, kind)));
+  };
+
   onSnapshot(
     query(collection(db, "posts"), orderBy("createdAt", "desc"), limit(20)),
-    (snap) => postsFeed.replaceChildren(...snap.docs.map(renderPost)),
+    (snap) => { adminPosts = snap.docs; drawFeed(); },
     (err) => console.warn("Posts not loaded:", err.code || err)
   );
+
+  // Only approved visitor posts (sorted here, so no extra Firestore index is needed)
+  onSnapshot(
+    query(submissionsRef, where("status", "==", "approved"), limit(50)),
+    (snap) => { visitorPosts = snap.docs; drawFeed(); },
+    (err) => console.warn("Visitor posts not loaded:", err.code || err)
+  );
+}
+
+// Pinned post: the admin can unpin it. Unpinned, it loses the "Pinned" label and
+// sits below the other posts (it has no date, so it counts as the oldest).
+{
+  const pinnedPost = document.getElementById("pinnedPost");
+  if (pinnedPost && postsFeed) {
+    onSnapshot(
+      doc(db, "site", "pinned"),
+      (snap) => {
+        const pinned = !snap.exists() || snap.data().pinned !== false;
+        pinnedPost.classList.toggle("is-unpinned", !pinned);
+        pinnedPost.setAttribute("aria-label", pinned ? "Pinned post" : "Post");
+        if (pinned) postsFeed.before(pinnedPost);
+        else postsFeed.after(pinnedPost);
+      },
+      (err) => console.warn("Pinned setting not loaded:", err.code || err)
+    );
+  }
 }
 
 })();

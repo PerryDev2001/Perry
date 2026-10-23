@@ -518,10 +518,11 @@ body { padding-top: calc(64px + env(safe-area-inset-top)); }
 
 .profile-visitors {
   display: inline-block;
-  margin-top: 10px;
+  margin: 10px 0 0;
   font-size: 14px;
   color: var(--muted);
   text-decoration: none;
+  cursor: default;
 }
 
 .profile-visitors strong {
@@ -530,7 +531,6 @@ body { padding-top: calc(64px + env(safe-area-inset-top)); }
   font-variant-numeric: tabular-nums;
 }
 
-.profile-visitors:hover { color: var(--accent-text); }
 
 /* Overlapping circles of recent visitors */
 .face-stack {
@@ -1763,15 +1763,29 @@ html.has-custom-cursor * {
 }
 
 .cursor-dot {
-  width: 10px;
-  height: 10px;
-  background: var(--fg);
-  box-shadow: 0 0 0 1.5px var(--bg), 0 2px 6px rgba(2, 44, 34, 0.25);
-  transition: background-color 0.25s ease;
+  width: 24px;
+  height: 24px;
+  border-radius: 0;
+  transform-origin: 5px 3px;   /* the arrow tip */
   will-change: transform;
 }
 
-.cursor-dot.is-active { background: var(--accent-2); }
+.cursor-dot svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  fill: var(--fg);
+  stroke: var(--bg);
+  stroke-width: 1.4;
+  stroke-linejoin: round;
+  paint-order: stroke;
+  filter: drop-shadow(0 2px 3px rgba(2, 44, 34, 0.3));
+  transition: fill 0.2s ease;
+}
+
+/* Over links and buttons the arrow turns mint */
+.cursor-dot.is-active svg { fill: var(--accent-2); }
 
 .cursor-burst {
   width: 3px;
@@ -2586,8 +2600,8 @@ html.theme-switching * {
   right: max(20px, env(safe-area-inset-right));
   bottom: max(20px, env(safe-area-inset-bottom));
   z-index: 9998;
-  width: 58px;
-  height: 58px;
+  width: 50px;
+  height: 50px;
   display: grid;
   place-items: center;
   padding: 0;
@@ -2602,7 +2616,7 @@ html.theme-switching * {
   transition: transform 0.35s var(--ease), box-shadow 0.35s var(--ease), opacity 0.25s ease;
 }
 
-.chat-fab .icon { width: 26px; height: 26px; }
+.chat-fab .icon { width: 22px; height: 22px; }
 
 /* Soft pulse ring */
 .chat-fab::before {
@@ -2654,8 +2668,8 @@ html.theme-switching * {
   .chat-fab {
     right: max(16px, env(safe-area-inset-right));
     bottom: max(16px, env(safe-area-inset-bottom));
-    width: 54px;
-    height: 54px;
+    width: 48px;
+    height: 48px;
   }
 }
 
@@ -3018,3 +3032,380 @@ html.has-post-dialog body { overflow: hidden; }
 .liker-sub strong { color: var(--fg); font-weight: 600; }
 .liker { gap: 14px; padding: 12px 2px; }
 
+
+/* Thin page scrollbar in the mint theme */
+html {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(16, 185, 129, 0.45) transparent;
+}
+
+:root[data-theme="dark"] { scrollbar-color: rgba(52, 211, 153, 0.35) transparent; }
+
+/* Older Chrome / Safari */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(16, 185, 129, 0.45); border-radius: 999px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(5, 150, 105, 0.7); }
+::-webkit-scrollbar-button { display: none; height: 0; }
+
+/* ==========================================================================
+   Theme switch (off = light, on = dark)
+   ========================================================================== */
+.dock:has(> .theme-switch:only-child) {
+  padding: 0;
+  background: none;
+  box-shadow: none;
+}
+
+.theme-switch {
+  position: relative;
+  flex: none;
+  width: 58px;
+  height: 32px;
+  padding: 3px;
+  display: inline-flex;
+  align-items: center;
+  background: var(--btn);
+  border: 0;
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 1px var(--border), inset 0 2px 4px rgba(2, 44, 34, 0.08);
+  cursor: pointer;
+  transition: background 0.35s var(--ease), box-shadow 0.35s ease;
+}
+
+.theme-switch:hover { box-shadow: inset 0 0 0 1px var(--accent-2), inset 0 2px 4px rgba(2, 44, 34, 0.08); }
+.theme-switch:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+.theme-switch[aria-checked="true"] {
+  background: var(--grad);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08), inset 0 2px 4px rgba(0, 0, 0, 0.25);
+}
+
+.switch-knob {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  color: #f59e0b;
+  background: #fff;
+  border-radius: 50%;
+  box-shadow: 0 2px 6px rgba(2, 44, 34, 0.25), 0 0 0 1px rgba(2, 44, 34, 0.04);
+  transition: transform 0.4s var(--ease), background-color 0.3s ease, color 0.3s ease;
+}
+
+.theme-switch[aria-checked="true"] .switch-knob {
+  transform: translateX(26px);
+  color: #e6f7f0;
+  background: #0c1c17;
+}
+
+.theme-switch:active .switch-knob { width: 30px; }
+.theme-switch[aria-checked="true"]:active .switch-knob { transform: translateX(22px); }
+
+.switch-knob .icon { width: 15px; height: 15px; grid-area: 1 / 1; }
+
+/* Knob shows the current mode: sun when light, moon when dark */
+.switch-knob .icon-moon { display: none; }
+.theme-switch[aria-checked="true"] .icon-sun { display: none; }
+.theme-switch[aria-checked="true"] .icon-moon { display: block; }
+.switch-knob .icon { animation: iconIn 0.6s var(--ease) both; }
+
+/* Tooltip like the other top bar buttons */
+@media (hover: hover) and (pointer: fine) {
+  .theme-switch[data-tip]::after {
+    content: attr(data-tip);
+    position: absolute;
+    top: calc(100% + 12px);
+    left: 50%;
+    z-index: 2;
+    padding: 5px 10px;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.2;
+    white-space: nowrap;
+    color: var(--bg);
+    background: var(--fg);
+    border-radius: 8px;
+    opacity: 0;
+    transform: translate(-50%, -4px);
+    transition: opacity 0.2s ease, transform 0.3s var(--ease);
+    pointer-events: none;
+  }
+
+  .theme-switch[data-tip]:hover::after {
+    opacity: 1;
+    transform: translate(-50%, 0);
+    transition-delay: 0.25s;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .theme-switch, .switch-knob { transition: none; }
+}
+
+/* The switch stays live during the theme reveal, so its knob slides smoothly
+   instead of being frozen in the page snapshot */
+.theme-switch { view-transition-name: theme-switch; }
+
+::view-transition-group(theme-switch),
+::view-transition-new(theme-switch) { animation: none; }
+::view-transition-old(theme-switch) { display: none; }
+
+html.theme-switching .theme-switch {
+  transition: background 0.35s var(--ease), box-shadow 0.35s ease !important;
+}
+
+html.theme-switching .switch-knob {
+  transition: transform 0.4s var(--ease), background-color 0.3s ease, color 0.3s ease !important;
+}
+
+.switch-knob { will-change: transform; }
+
+/* ==========================================================================
+   Visitor posts: "Create post" card, the post form, community posts
+   ========================================================================== */
+.composer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+}
+
+.composer-me,
+.post-avatar-letter {
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  font-family: var(--font-display);
+  font-weight: 700;
+  color: #fff;
+  background: linear-gradient(135deg, hsl(var(--h, 160) 70% 55%), hsl(calc(var(--h, 160) + 30) 70% 42%));
+}
+
+.composer-me { width: 40px; height: 40px; font-size: 16px; }
+
+.composer-open {
+  flex: 1;
+  min-width: 0;
+  height: 42px;
+  padding: 0 16px;
+  font: inherit;
+  font-size: 14px;
+  text-align: left;
+  color: var(--muted);
+  background: var(--inset);
+  border: 1px solid transparent;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.composer-open:hover { background: var(--hover); border-color: var(--border); }
+
+.composer-icon,
+.composer-post {
+  flex: none;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: transform 0.25s var(--ease), background-color 0.2s ease, box-shadow 0.25s ease;
+}
+
+.composer-icon {
+  width: 40px;
+  padding: 0;
+  color: var(--accent-text);
+  background: transparent;
+}
+
+.composer-icon:hover { background: var(--hover); transform: rotate(-14deg) scale(1.08); }
+.composer-icon .icon { width: 22px; height: 22px; }
+
+.composer-post {
+  padding: 0 16px;
+  color: var(--on-accent);
+  background: var(--grad);
+  box-shadow: 0 8px 18px -10px var(--accent-2);
+}
+
+.composer-post:hover { transform: translateY(-1px); box-shadow: 0 12px 24px -10px var(--accent-2); }
+.composer-post .icon { width: 16px; height: 16px; }
+
+.composer-open:focus-visible,
+.composer-icon:focus-visible,
+.composer-post:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+@media (max-width: 420px) {
+  .composer { gap: 8px; padding: 12px; }
+  .composer-post { width: 40px; padding: 0; font-size: 0; gap: 0; }
+  .composer-post .icon { width: 18px; height: 18px; }
+}
+
+/* The form inside the pop-up */
+.composer-sheet { padding-bottom: 20px; }
+
+.composer-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: -4px 0 16px;
+  padding: 10px 12px;
+  font-size: 13px;
+  color: var(--accent-text);
+  background: var(--accent-soft);
+  border-radius: 12px;
+}
+
+.composer-note .icon { flex: none; width: 16px; height: 16px; }
+.composer-note[hidden] { display: none; }
+
+.composer-form { display: flex; flex-direction: column; gap: 14px; }
+.composer-form[hidden] { display: none; }
+
+.composer-field { display: flex; flex-direction: column; gap: 6px; }
+
+.composer-label { font-size: 13px; font-weight: 600; }
+.composer-req { color: #e11d48; }
+
+.composer-input,
+.composer-textarea {
+  width: 100%;
+  font: inherit;
+  font-size: 15px;
+  color: var(--fg);
+  background: transparent;
+  border: 0;
+  outline: none;
+}
+
+.composer-input {
+  height: 44px;
+  padding: 0 14px;
+  background: var(--inset);
+  border: 1px solid transparent;
+  border-radius: 14px;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.composer-caption {
+  background: var(--inset);
+  border: 1px solid transparent;
+  border-radius: 16px;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.composer-input:focus,
+.composer-caption:focus-within {
+  border-color: var(--accent-2);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.composer-input[aria-invalid="true"],
+.composer-caption:has([aria-invalid="true"]) {
+  border-color: #e11d48;
+  box-shadow: 0 0 0 3px rgba(225, 29, 72, 0.14);
+}
+
+.composer-input::placeholder,
+.composer-textarea::placeholder { color: var(--muted); }
+
+.composer-textarea {
+  display: block;
+  min-height: 104px;
+  max-height: 260px;
+  padding: 12px 14px 4px;
+  line-height: 1.5;
+  resize: none;
+}
+
+.composer-caption-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2px 6px 6px;
+}
+
+.composer-caption-foot .chat-emoji-btn { width: 36px; height: 36px; }
+.composer-caption-foot .chat-emoji-btn .icon { width: 21px; height: 21px; }
+
+.composer-count {
+  padding-right: 8px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+.composer-count.is-low { color: #e11d48; font-weight: 600; }
+
+/* Emoji picker opens inline above the caption box */
+.composer-emoji-picker,
+.inline-emoji-picker.composer-emoji-picker {
+  position: relative;
+  left: auto;
+  right: auto;
+  bottom: auto;
+  height: 220px;
+  box-shadow: none;
+}
+
+.composer-status { margin: 0; }
+.composer-submit { align-self: stretch; justify-content: center; }
+.composer-submit:disabled { opacity: 0.6; cursor: progress; }
+
+/* "Sent for review" */
+.composer-done {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 18px 8px 6px;
+  text-align: center;
+}
+
+.composer-done[hidden] { display: none; }
+
+.composer-done-icon {
+  width: 56px;
+  height: 56px;
+  display: grid;
+  place-items: center;
+  margin-bottom: 6px;
+  color: var(--on-accent);
+  background: var(--grad);
+  border-radius: 50%;
+  box-shadow: 0 12px 26px -12px var(--accent-2);
+}
+
+.composer-done-icon .icon { width: 26px; height: 26px; stroke-width: 2.4; }
+.composer-done h4 { margin: 0; font-family: var(--font-display); font-size: 17px; }
+.composer-done p { margin: 0 0 12px; max-width: 34ch; font-size: 14px; color: var(--muted); }
+
+/* Community (visitor) posts in the feed */
+.post-avatar-letter { width: 42px; height: 42px; padding: 0; font-size: 17px; }
+
+.post-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 7px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent-text);
+  background: var(--accent-soft);
+  border-radius: 999px;
+}
+
+.post-tag .icon { width: 11px; height: 11px; }
+
+/* Unpinned: no "Pinned" label */
+.post.is-unpinned .pin-label { display: none; }
+.pin-label { display: inline-flex; align-items: center; gap: 4px; }

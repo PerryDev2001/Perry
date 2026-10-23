@@ -38,8 +38,7 @@ const ThemeReveal = {
 
   const applyTheme = (theme) => {
     root.setAttribute("data-theme", theme);
-    const next = theme === "dark" ? "light" : "dark";
-    toggle.setAttribute("aria-label", `Switch to ${next} theme`);
+    toggle.setAttribute("aria-checked", String(theme === "dark"));   // switch is "on" in dark mode
   };
 
   applyTheme(getStored() || (systemPrefersDark.matches ? "dark" : "light"));
@@ -52,6 +51,7 @@ const ThemeReveal = {
   toggle.addEventListener("click", () => {
     const next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
     setStored(next);
+    toggle.setAttribute("aria-checked", String(next === "dark"));   // knob starts sliding right away
 
     if (reduceMotion.matches) {
       applyTheme(next);
@@ -105,7 +105,7 @@ const ThemeReveal = {
   const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 
   const INTERACTIVE = "a, button, [role='button'], input, textarea, select, summary, label";
-  const DOT_SIZE = 10;
+  const TIP_X = 5, TIP_Y = 3;                    // arrow tip inside its 24px box
   const BURST_COUNT = 8;
   const MAX_SPEED = 5;
   const JOIN_AT = 0.3;                           // pull strength at which a heart joins for good
@@ -593,13 +593,13 @@ const ThemeReveal = {
     state.kScale += (kTarget - state.kScale) * lerp(0.06);
 
     if (state.visible) {
-      // Main dot
-      state.dx += (state.mx - state.dx) * lerp(0.35);
-      state.dy += (state.my - state.dy) * lerp(0.35);
-      const scaleTarget = state.pressed ? 0.75 : state.overInteractive ? 1.8 : 1;
-      state.dScale += (scaleTarget - state.dScale) * lerp(0.2);
+      // Arrow cursor: sits exactly on the pointer (no lag), shrinks a little when pressed
+      state.dx = state.mx;
+      state.dy = state.my;
+      const scaleTarget = state.pressed ? 0.86 : state.overInteractive ? 1.08 : 1;
+      state.dScale += (scaleTarget - state.dScale) * lerp(0.3);
       dot.style.transform =
-        `translate3d(${state.dx - DOT_SIZE / 2}px, ${state.dy - DOT_SIZE / 2}px, 0) scale(${state.dScale})`;
+        `translate3d(${state.dx - TIP_X}px, ${state.dy - TIP_Y}px, 0) scale(${state.dScale})`;
     }
 
     updateSweep(now, t, lerp);

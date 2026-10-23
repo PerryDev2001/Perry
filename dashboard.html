@@ -60,6 +60,11 @@
           Messages
           <span class="nav-badge" id="navMessages" hidden></span>
         </a>
+        <a href="#submissions" data-tab="submissions">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9" /><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" /></svg>
+          Anonymous posts
+          <span class="nav-badge" id="navSubmissions" hidden></span>
+        </a>
         <a href="#comments" data-tab="comments">
           <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z" /></svg>
           Comments
@@ -189,6 +194,17 @@
           </form>
 
           <div class="card">
+            <div class="card-header">
+              <div>
+                <h2>Pinned post <span class="badge badge-brand" id="pinnedBadge">Pinned</span></h2>
+                <p id="pinnedState">Loading…</p>
+              </div>
+              <button class="btn btn-outline btn-sm" type="button" id="pinToggle" disabled>Loading…</button>
+            </div>
+            <p class="pinned-text" id="pinnedText">Loading…</p>
+          </div>
+
+          <div class="card">
             <div class="card-header"><div><h2>Published</h2><p id="postCount">Loading…</p></div></div>
             <ul class="list" id="postList"><li class="empty">Loading…</li></ul>
           </div>
@@ -222,6 +238,21 @@
               </button>
             </form>
             <p class="alert chat-alert" id="adminChatMessage" role="status" hidden></p>
+          </div>
+        </section>
+
+        <!-- Anonymous posts -->
+        <section class="panel" data-panel="submissions" hidden>
+          <div class="page-head">
+            <h1>Anonymous posts</h1>
+            <p>Posts sent by visitors. They only show on your page after you approve them.</p>
+          </div>
+          <div class="seg" role="tablist" aria-label="Filter posts">
+            <button class="seg-btn is-active" type="button" role="tab" aria-selected="true" data-filter="pending">Pending <span class="seg-count" id="subPendingCount">0</span></button>
+            <button class="seg-btn" type="button" role="tab" aria-selected="false" data-filter="approved">Approved <span class="seg-count" id="subApprovedCount">0</span></button>
+          </div>
+          <div class="card">
+            <ul class="list" id="submissionList"><li class="empty">Loading…</li></ul>
           </div>
         </section>
 

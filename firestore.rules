@@ -81,7 +81,7 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
-    // Comments on the pinned post or any post: anyone can read. Posting needs an (anonymous) sign-in;
+    // Comments on the pinned post, any post, or an approved visitor post: anyone can read. Posting needs an (anonymous) sign-in;
     // the author can edit the text or delete it, and admins can delete any comment.
     match /comments/{commentId} {
       allow read: if true;
@@ -94,7 +94,9 @@ service cloud.firestore {
         request.resource.data.post is string &&
         request.resource.data.post.size() <= 40 &&
         (request.resource.data.post == 'pinned' ||
-          exists(/databases/$(database)/documents/posts/$(request.resource.data.post))) &&
+          exists(/databases/$(database)/documents/posts/$(request.resource.data.post)) ||
+          (exists(/databases/$(database)/documents/submissions/$(request.resource.data.post)) &&
+            get(/databases/$(database)/documents/submissions/$(request.resource.data.post)).data.status == 'approved')) &&
         request.resource.data.text is string &&
         request.resource.data.text.size() > 0 &&
         request.resource.data.text.size() <= 300 &&
@@ -138,7 +140,7 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
-    // Site settings (the public profile): anyone can read; only admins can change.
+    // Site settings (the public profile, the pinned post on/off): anyone can read; only admins can change.
     match /site/{docId} {
       allow read: if true;
 
@@ -155,6 +157,15 @@ service cloud.firestore {
         request.resource.data.bio.size() <= 300 &&
         request.resource.data.bioRef is string &&
         request.resource.data.bioRef.size() <= 60 &&
+        request.resource.data.updatedAt == request.time;
+
+      // Pinned post on/off
+      allow write: if
+        isAdmin() &&
+        docId == 'pinned' &&
+        request.resource.data.keys().hasOnly(['pinned', 'updatedAt']) &&
+        request.resource.data.keys().hasAll(['pinned', 'updatedAt']) &&
+        request.resource.data.pinned is bool &&
         request.resource.data.updatedAt == request.time;
     }
 
@@ -181,6 +192,44 @@ service cloud.firestore {
       allow delete: if
         isAdmin() ||
         (request.auth != null && resource.data.uid == request.auth.uid);
+    }
+
+    // Visitor posts: anyone (anonymous sign-in) can send one; it starts as "pending".
+    // Everyone can read approved ones; pending ones are visible only to admins and their author.
+    // Only admins can approve / unpublish (status) or delete.
+    match /submissions/{postId} {
+      allow read: if
+        resource.data.status == 'approved' ||
+        isAdmin() ||
+        (request.auth != null && resource.data.uid == request.auth.uid);
+
+      allow create: if
+        request.auth != null &&
+        request.resource.data.keys().hasOnly(['name', 'text', 'uid', 'device', 'country', 'countryName', 'status', 'createdAt']) &&
+        request.resource.data.keys().hasAll(['name', 'text', 'uid', 'device', 'country', 'countryName', 'status', 'createdAt']) &&
+        request.resource.data.uid == request.auth.uid &&
+        request.resource.data.status == 'pending' &&
+        request.resource.data.name is string &&
+        request.resource.data.name.size() > 0 &&
+        request.resource.data.name.size() <= 24 &&
+        request.resource.data.text is string &&
+        request.resource.data.text.size() > 0 &&
+        request.resource.data.text.size() <= 1000 &&
+        request.resource.data.device is string &&
+        request.resource.data.device.size() <= 40 &&
+        request.resource.data.country is string &&
+        request.resource.data.country.size() <= 2 &&
+        request.resource.data.countryName is string &&
+        request.resource.data.countryName.size() <= 56 &&
+        request.resource.data.createdAt == request.time;
+
+      allow update: if
+        isAdmin() &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'reviewedAt']) &&
+        request.resource.data.status in ['pending', 'approved'] &&
+        request.resource.data.reviewedAt == request.time;
+
+      allow delete: if isAdmin();
     }
 
     // Everything else is closed.
